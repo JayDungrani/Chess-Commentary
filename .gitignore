@@ -5,6 +5,27 @@ build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Virtual environments
 .venv
+venv/
+
+# Secrets (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# Generated TTS audio
+backend/static/audio/*.mp3
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
