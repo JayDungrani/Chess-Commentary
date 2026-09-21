@@ -1,7 +1,7 @@
 // src/components/commentary/CommentaryStudio.tsx
 
 import React from 'react';
-import { Radio, Volume2, Sparkles } from 'lucide-react';
+import { Volume2, Sparkles } from 'lucide-react';
 import type {
   CommentaryExchange,
   CommentatorRole,
@@ -9,6 +9,7 @@ import type {
 } from '../../types/broadcast';
 import { SpeakerAvatar } from './SpeakerAvatar';
 import { TranscriptFeed } from './TranscriptFeed';
+import { useTheme } from '../../context/ThemeContext';
 
 interface CommentaryStudioProps {
   latestCommentary?: CommentaryExchange | null;
@@ -24,6 +25,7 @@ export const CommentaryStudio: React.FC<CommentaryStudioProps> = ({
   currentTurn,
   isSpeaking,
 }) => {
+  const { isDark } = useTheme();
   // Determine which text to display on the main studio board
   const displayTurn: DialogueTurn | null =
     currentTurn ||
@@ -54,15 +56,25 @@ export const CommentaryStudio: React.FC<CommentaryStudioProps> = ({
       </div>
 
       {/* 2. Active Speech Bubble / Hero Dialogue Card */}
-      <div className="relative p-4 rounded-2xl bg-[#12151d] border border-stone-800 shadow-xl overflow-hidden min-h-[115px] shrink-0 flex flex-col justify-between">
+      <div
+        className={`relative p-4 rounded-2xl border shadow-xl overflow-hidden min-h-[115px] shrink-0 flex flex-col justify-between transition-colors duration-200 ${
+          isDark
+            ? 'bg-[#13151b] border-white/[0.08] shadow-black/60'
+            : 'bg-white border-black/[0.08] shadow-neutral-300/40'
+        }`}
+      >
         {/* Subtle Top Accent Line */}
         <div
-          className={`absolute top-0 left-0 right-0 h-[2px] transition-colors duration-500 ${
+          className={`absolute top-0 left-0 right-0 h-[2px] transition-colors duration-300 ${
             isSpeaking
               ? isHost
-                ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.3)]'
-                : 'bg-stone-300 shadow-[0_0_8px_rgba(214,211,209,0.3)]'
-              : 'bg-stone-800'
+                ? 'bg-[#e05338] shadow-[0_0_8px_rgba(224,83,56,0.4)]'
+                : isDark
+                ? 'bg-neutral-300 shadow-[0_0_8px_rgba(255,255,255,0.3)]'
+                : 'bg-neutral-600'
+              : isDark
+              ? 'bg-white/[0.05]'
+              : 'bg-black/[0.05]'
           }`}
         />
 
@@ -72,10 +84,10 @@ export const CommentaryStudio: React.FC<CommentaryStudioProps> = ({
             <div className="flex items-center gap-1.5 font-bold tracking-wider uppercase">
               <Sparkles
                 className={`w-3.5 h-3.5 ${
-                  isSpeaking ? 'text-amber-400' : 'text-stone-500'
+                  isSpeaking ? 'text-[#e05338]' : isDark ? 'text-neutral-500' : 'text-neutral-400'
                 }`}
               />
-              <span className={isHost ? 'text-amber-300' : 'text-stone-300'}>
+              <span className={isHost ? 'text-[#e05338]' : isDark ? 'text-neutral-200' : 'text-neutral-800'}>
                 {displayTurn
                   ? `${displayTurn.speaker === 'HOST' ? 'James' : 'Peter'} Speaking`
                   : 'Live Broadcast'}
@@ -83,7 +95,7 @@ export const CommentaryStudio: React.FC<CommentaryStudioProps> = ({
             </div>
 
             {isSpeaking && (
-              <div className="flex items-center gap-1.5 text-rose-400 font-mono text-[10px] font-bold">
+              <div className="flex items-center gap-1.5 text-[#e05338] font-mono text-[10px] font-bold">
                 <Volume2 className="w-3.5 h-3.5 animate-bounce" />
                 <span>NARRATING</span>
               </div>
@@ -91,11 +103,15 @@ export const CommentaryStudio: React.FC<CommentaryStudioProps> = ({
           </div>
 
           {/* Spoken Narration Script */}
-          <p className="text-sm font-medium text-stone-200 leading-relaxed select-text italic">
+          <p
+            className={`text-sm font-medium leading-relaxed select-text italic ${
+              isDark ? 'text-neutral-200' : 'text-neutral-800'
+            }`}
+          >
             {displayTurn ? (
               `"${displayTurn.text}"`
             ) : (
-              <span className="not-italic text-stone-500">
+              <span className={`not-italic ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>
                 Waiting for the first move to hit the broadcast board...
               </span>
             )}
@@ -104,7 +120,11 @@ export const CommentaryStudio: React.FC<CommentaryStudioProps> = ({
 
         {/* Audio Duration Estimate Footer */}
         {displayTurn?.estimated_duration_seconds != null && (
-          <div className="flex items-center justify-end text-[10px] font-mono text-stone-500 pt-1">
+          <div
+            className={`flex items-center justify-end text-[10px] font-mono pt-1 ${
+              isDark ? 'text-neutral-500' : 'text-neutral-400'
+            }`}
+          >
             <span>~{displayTurn.estimated_duration_seconds.toFixed(1)}s voice clip</span>
           </div>
         )}

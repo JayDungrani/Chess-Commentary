@@ -124,6 +124,8 @@ def build_pondering_prompt(context: CommentaryContext) -> str:
         "### PONDERING GUIDANCE (NATURAL TV BROADCAST DESK STYLE):",
         f"- {acting_player} is paused on the clock, calculating over the board.",
         f"- STYLE DIRECTIVE FOR THIS PAUSE: {style_directive}",
+        "- REQUIRED PHRASING STYLE: SPECULATE CONDITIONALLY using candidate moves.",
+        "- DO NOT claim you know what they ARE thinking; phrase conditionally as spectator speculation.",
         "",
         "### STRICT ANTI-REPETITION RULES (DO NOT USE ROBOTIC TEMPLATES):",
         "- STRICT BAN: NEVER say '[Color] is deep in thought', 'weighing their options', 'could they be debating between', or 'at a critical crossroads'.",

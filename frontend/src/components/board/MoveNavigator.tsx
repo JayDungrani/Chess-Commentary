@@ -9,6 +9,7 @@ import {
   Radio,
 } from 'lucide-react';
 import { formatPlyToMoveNumber } from '../../utils/formatters';
+import { useTheme } from '../../context/ThemeContext';
 
 interface MoveNavigatorProps {
   currentPly: number;
@@ -31,6 +32,7 @@ export const MoveNavigator: React.FC<MoveNavigatorProps> = ({
   moveSan,
   turn,
 }) => {
+  const { isDark } = useTheme();
   // Arrow key navigation listener (Left = previous, Right = next)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -65,14 +67,22 @@ export const MoveNavigator: React.FC<MoveNavigatorProps> = ({
   const canGoForward = currentPly < maxPly;
 
   return (
-    <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-[#12151d] border border-stone-800 shadow-md select-none shrink-0">
+    <div
+      className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl border shadow-sm select-none shrink-0 transition-colors duration-200 ${
+        isDark ? 'bg-[#13151b] border-white/[0.08]' : 'bg-white border-neutral-200'
+      }`}
+    >
       {/* 1. Step Arrow Controls */}
       <div className="flex items-center gap-1">
         {/* Jump to start */}
         <button
           onClick={() => onNavigate(minPly)}
           disabled={!canGoBack}
-          className="p-1 rounded-md text-stone-400 hover:text-stone-100 hover:bg-stone-800/80 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          className={`p-1 rounded-md disabled:opacity-30 disabled:pointer-events-none transition-colors ${
+            isDark
+              ? 'text-neutral-400 hover:text-white hover:bg-white/[0.08]'
+              : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/[0.05]'
+          }`}
           title="Jump to Start"
         >
           <ChevronsLeft className="w-4 h-4" />
@@ -82,7 +92,11 @@ export const MoveNavigator: React.FC<MoveNavigatorProps> = ({
         <button
           onClick={() => onNavigate(currentPly - 1)}
           disabled={!canGoBack}
-          className="p-1 rounded-md text-stone-400 hover:text-stone-100 hover:bg-stone-800/80 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          className={`p-1 rounded-md disabled:opacity-30 disabled:pointer-events-none transition-colors ${
+            isDark
+              ? 'text-neutral-400 hover:text-white hover:bg-white/[0.08]'
+              : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/[0.05]'
+          }`}
           title="Previous Move (← Arrow)"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -99,7 +113,11 @@ export const MoveNavigator: React.FC<MoveNavigatorProps> = ({
             }
           }}
           disabled={!canGoForward}
-          className="p-1 rounded-md text-stone-400 hover:text-stone-100 hover:bg-stone-800/80 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          className={`p-1 rounded-md disabled:opacity-30 disabled:pointer-events-none transition-colors ${
+            isDark
+              ? 'text-neutral-400 hover:text-white hover:bg-white/[0.08]'
+              : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/[0.05]'
+          }`}
           title="Next Move (→ Arrow)"
         >
           <ChevronRight className="w-4 h-4" />
@@ -109,7 +127,11 @@ export const MoveNavigator: React.FC<MoveNavigatorProps> = ({
         <button
           onClick={onGoLive}
           disabled={isLive}
-          className="p-1 rounded-md text-stone-400 hover:text-stone-100 hover:bg-stone-800/80 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          className={`p-1 rounded-md disabled:opacity-30 disabled:pointer-events-none transition-colors ${
+            isDark
+              ? 'text-neutral-400 hover:text-white hover:bg-white/[0.08]'
+              : 'text-neutral-500 hover:text-neutral-900 hover:bg-black/[0.05]'
+          }`}
           title="Jump to Latest (Live)"
         >
           <ChevronsRight className="w-4 h-4" />
@@ -119,33 +141,35 @@ export const MoveNavigator: React.FC<MoveNavigatorProps> = ({
       {/* 2. Inspected Position Display */}
       <div className="flex items-center gap-2 font-mono text-xs">
         {currentPly === 0 ? (
-          <span className="text-stone-400">Start Position</span>
+          <span className={isDark ? 'text-neutral-500' : 'text-neutral-500'}>Start Position</span>
         ) : moveSan ? (
           <div className="flex items-center gap-1">
-            <span className="text-stone-500 font-bold">
+            <span className={isDark ? 'text-neutral-500 font-bold' : 'text-neutral-400 font-bold'}>
               {formatPlyToMoveNumber(currentPly, turn || 'white')}
             </span>
-            <span className="text-amber-400 font-bold">{moveSan}</span>
+            <span className="text-[#e05338] font-bold">{moveSan}</span>
           </div>
         ) : (
-          <span className="text-stone-400">Ply {currentPly}</span>
+          <span className={isDark ? 'text-neutral-500' : 'text-neutral-500'}>
+            Ply {currentPly}
+          </span>
         )}
       </div>
 
       {/* 3. Live Status & Snap-Back Pill */}
       <div>
         {isLive ? (
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400 text-[10px] font-bold font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#e05338]/15 border border-[#e05338]/30 text-[#e05338] text-[10px] font-bold font-mono">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#e05338] animate-pulse" />
             LIVE
           </div>
         ) : (
           <button
             onClick={onGoLive}
-            className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25 text-[10px] font-bold transition-all shadow-sm"
+            className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#e05338]/15 border border-[#e05338]/40 text-[#e05338] hover:bg-[#e05338]/25 text-[10px] font-bold transition-all shadow-sm"
             title="Return to latest live position"
           >
-            <Radio className="w-3 h-3 text-amber-400 animate-pulse" />
+            <Radio className="w-3 h-3 text-[#e05338] animate-pulse" />
             SNAP TO LIVE
           </button>
         )}

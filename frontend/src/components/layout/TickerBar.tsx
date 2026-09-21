@@ -1,9 +1,8 @@
-// src/components/layout/TickerBar.tsx
-
 import React from 'react';
 import { AlertTriangle, Sparkles, Cpu, ShieldAlert } from 'lucide-react';
 import type { MoveEvaluation, ParsedMoveEvent } from '../../types/broadcast';
 import { formatEval, formatPlyToMoveNumber, getClassificationStyles } from '../../utils/formatters';
+import { useTheme } from '../../context/ThemeContext';
 
 interface TickerBarProps {
   evaluation?: MoveEvaluation | null;
@@ -18,19 +17,31 @@ export const TickerBar: React.FC<TickerBarProps> = ({
   terminationReason,
   isGameOver,
 }) => {
+  const { isDark } = useTheme();
+
   // If match has completed, display prominent final result banner
   if (isGameOver && terminationReason) {
     return (
-      <footer className="w-full bg-[#12151d] border-t border-stone-800 px-4 py-2 flex items-center justify-between text-xs font-mono shadow-2xl z-20">
+      <footer
+        className={`w-full border-t px-4 py-2 flex items-center justify-between text-xs font-mono shadow-lg z-20 transition-colors duration-200 ${
+          isDark ? 'bg-[#13151b] border-white/[0.08]' : 'bg-white border-neutral-200'
+        }`}
+      >
         <div className="flex items-center gap-2">
-          <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold tracking-wider uppercase text-[10px]">
+          <span className="px-2 py-0.5 rounded bg-[#e05338]/15 border border-[#e05338]/30 text-[#e05338] font-bold tracking-wider uppercase text-[10px]">
             FINAL RESULT
           </span>
-          <span className="text-stone-100 font-bold text-sm tracking-tight font-sans">
+          <span
+            className={`font-bold text-sm tracking-tight font-sans ${
+              isDark ? 'text-neutral-100' : 'text-neutral-900'
+            }`}
+          >
             {terminationReason}
           </span>
         </div>
-        <span className="text-stone-500 text-[11px]">Match Concluded</span>
+        <span className={isDark ? 'text-neutral-400 text-[11px]' : 'text-neutral-500 text-[11px]'}>
+          Match Concluded
+        </span>
       </footer>
     );
   }
@@ -80,15 +91,25 @@ export const TickerBar: React.FC<TickerBarProps> = ({
   })();
 
   return (
-    <footer className="w-full bg-[#0a0c10] border-t border-stone-800/90 px-4 py-1.5 flex items-center justify-between gap-4 text-xs z-20 select-none">
+    <footer
+      className={`w-full border-t px-4 py-1.5 flex items-center justify-between gap-4 text-xs z-20 select-none transition-colors duration-200 ${
+        isDark ? 'bg-[#0b0c0f] border-white/[0.08]' : 'bg-white border-neutral-200'
+      }`}
+    >
       {/* Left: Move Identification & Quality Tag */}
       <div className="flex items-center gap-2.5 shrink-0">
         {lastMove && (
           <div className="flex items-center gap-1.5 font-mono">
-            <span className="text-stone-500 font-bold">
+            <span className={isDark ? 'text-neutral-500 font-bold' : 'text-neutral-400 font-bold'}>
               {formatPlyToMoveNumber(lastMove.ply, lastMove.turn)}
             </span>
-            <span className="font-bold text-stone-100 text-sm">{lastMove.san}</span>
+            <span
+              className={`font-bold text-sm ${
+                isDark ? 'text-neutral-100' : 'text-neutral-900'
+              }`}
+            >
+              {lastMove.san}
+            </span>
           </div>
         )}
 
@@ -101,7 +122,13 @@ export const TickerBar: React.FC<TickerBarProps> = ({
         )}
 
         {evaluation && (
-          <span className="text-[11px] font-mono font-bold text-stone-300 bg-[#12151d] px-2 py-0.5 rounded border border-stone-800">
+          <span
+            className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded border ${
+              isDark
+                ? 'text-neutral-200 bg-[#13151b] border-white/[0.08]'
+                : 'text-neutral-800 bg-neutral-100 border-neutral-200'
+            }`}
+          >
             {evalStr}
           </span>
         )}
@@ -111,49 +138,57 @@ export const TickerBar: React.FC<TickerBarProps> = ({
       <div className="flex-1 min-w-0 flex items-center gap-2 overflow-hidden truncate">
         {/* Scenario A: Blunder Refutation Sequence */}
         {evaluation?.blunder_dossier ? (
-          <div className="flex items-center gap-2 text-rose-400 font-mono text-[11px] truncate">
+          <div className="flex items-center gap-2 text-rose-500 font-mono text-[11px] truncate">
             <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
             <span className="font-bold">PUNISHMENT:</span>
-            <span className="text-stone-200">
+            <span className={isDark ? 'text-neutral-200' : 'text-neutral-800'}>
               {evaluation.blunder_dossier.punishment_moves_san.slice(0, 4).join(' ')}
             </span>
-            <span className="text-stone-500 truncate hidden lg:inline">
+            <span className="text-neutral-500 truncate hidden lg:inline">
               ({evaluation.blunder_dossier.refutation_explanation})
             </span>
           </div>
         ) : isBrilliant ? (
           /* Scenario B: Brilliant Piece Sacrifice */
-          <div className="flex items-center gap-2 text-amber-300 font-mono text-[11px]">
-            <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <div className="flex items-center gap-2 text-[#e05338] font-mono text-[11px]">
+            <Sparkles className="w-3.5 h-3.5 text-[#e05338] shrink-0" />
             <span className="font-bold">BRILLIANCY:</span>
-            <span className="text-stone-200">Decisive tactical sacrifice executed on board.</span>
+            <span className={isDark ? 'text-neutral-200' : 'text-neutral-800'}>
+              Decisive tactical sacrifice executed on board.
+            </span>
           </div>
         ) : isSuboptimal && evaluation?.should_have_played ? (
           /* Scenario C: Better Alternative Missed */
-          <div className="flex items-center gap-2 text-stone-300 font-mono text-[11px] truncate">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="font-bold text-stone-400">BETTER TRY:</span>
-            <span className="text-amber-300 font-bold">
+          <div className="flex items-center gap-2 font-mono text-[11px] truncate">
+            <AlertTriangle className="w-3.5 h-3.5 text-[#e05338] shrink-0" />
+            <span className="font-bold text-neutral-500">BETTER TRY:</span>
+            <span className="text-[#e05338] font-bold">
               {evaluation.should_have_played.primary_move_san}
             </span>
             {evaluation.should_have_played.san_moves.length > 1 && (
-              <span className="text-stone-500 hidden sm:inline truncate">
+              <span className="text-neutral-500 hidden sm:inline truncate">
                 ({evaluation.should_have_played.san_moves.slice(1, 4).join(' ')})
               </span>
             )}
           </div>
         ) : engineLineMoves.length > 0 ? (
           /* Scenario D: Engine Line / Principal Variation Continuation */
-          <div className="flex items-center gap-2 text-stone-400 font-mono text-[11px] truncate">
-            <Cpu className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="text-stone-400 font-bold uppercase tracking-wider text-[10px] shrink-0">
+          <div className="flex items-center gap-2 font-mono text-[11px] truncate">
+            <Cpu className="w-3.5 h-3.5 text-[#e05338] shrink-0" />
+            <span className="text-neutral-500 font-bold uppercase tracking-wider text-[10px] shrink-0">
               ENGINE LINE:
             </span>
             <div className="flex items-center gap-1.5 truncate">
               {engineLineMoves.map((move, idx) => (
                 <span
                   key={idx}
-                  className={idx === 0 ? 'text-amber-300 font-bold' : 'text-stone-300'}
+                  className={
+                    idx === 0
+                      ? 'text-[#e05338] font-bold'
+                      : isDark
+                      ? 'text-neutral-300'
+                      : 'text-neutral-700'
+                  }
                 >
                   {move}
                 </span>
@@ -161,7 +196,7 @@ export const TickerBar: React.FC<TickerBarProps> = ({
             </div>
           </div>
         ) : (
-          <span className="text-stone-600 font-mono text-[11px]">
+          <span className="text-neutral-500 font-mono text-[11px]">
             Waiting for live engine analysis...
           </span>
         )}
@@ -169,9 +204,13 @@ export const TickerBar: React.FC<TickerBarProps> = ({
 
       {/* Right: Opening or Theory Tag */}
       {evaluation?.opening_name && (
-        <div className="hidden md:flex items-center gap-1.5 text-[11px] text-stone-400 font-mono shrink-0">
-          <span className="text-stone-700">•</span>
-          <span className="truncate max-w-[200px] text-stone-300">
+        <div className="hidden md:flex items-center gap-1.5 text-[11px] font-mono shrink-0">
+          <span className="text-neutral-500">•</span>
+          <span
+            className={`truncate max-w-[200px] ${
+              isDark ? 'text-neutral-300' : 'text-neutral-700'
+            }`}
+          >
             {evaluation.opening_name}
           </span>
         </div>

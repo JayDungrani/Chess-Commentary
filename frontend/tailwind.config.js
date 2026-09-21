@@ -1,23 +1,24 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
-        // Deep, neutral broadcast darks (replacing harsh blue-black)
+        // Industrial Instrument Basalt Darks
         studio: {
-          950: '#0c0d10',
-          900: '#14161b',
-          850: '#1c1f26',
-          800: '#262a34',
-          700: '#383e4d',
+          950: '#0b0c0f',
+          900: '#13151b',
+          850: '#1a1d25',
+          800: '#242834',
+          700: '#343a4a',
         },
-        // Subtle, elegant tournament accents (replacing neon cyan/bright green)
+        // Industrial Hardware Accents
         broadcast: {
-          accent: '#d4af37',   // Muted tournament gold
-          live: '#e05252',     // Classic broadcast red
-          host: '#3b82f6',     // Slate blue
-          analyst: '#8b5cf6',  // Subdued violet
+          accent: '#e05338',   // Signal Orange
+          live: '#e05338',     // Muted Terracotta Red
+          host: '#4f78a8',     // Anodized Steel Blue
+          analyst: '#876ea8',  // Anodized Slate Purple
         },
         chess: {
           blunder: '#dc2626',

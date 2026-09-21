@@ -43,13 +43,15 @@ class PacedMoveStreamer:
         enable_pondering: bool = True,
         cooldown_plies: int = 4,
         min_ponder_ply: int = 8,
+        is_broadcast: bool = False,
     ):
         self.streamer = streamer
+        self.is_broadcast = is_broadcast
         self.fast_forward_initial = fast_forward_initial_history
-        self.max_paced_move_delay = max_paced_move_delay_seconds
+        self.max_paced_move_delay = 0.0 if is_broadcast else max_paced_move_delay_seconds
         self.target_live_ply = target_live_ply
         self.game_format = game_format
-        self.enable_pondering = enable_pondering
+        self.enable_pondering = False if is_broadcast else enable_pondering
         self.cooldown_plies = cooldown_plies
         self.min_ponder_ply = min_ponder_ply
         self.last_pondered_ply: Optional[int] = None
@@ -66,6 +68,12 @@ class PacedMoveStreamer:
         """Dynamically adapts the maximum buffer delay based on game speed."""
         fmt = (game_format or "").lower()
         self.game_format = fmt
+        if self.is_broadcast:
+            self.max_paced_move_delay = 0.0
+            self.enable_pondering = False
+            logger.info(f"PacedMoveStreamer format set to '{game_format}', but is_broadcast=True: max pace delay kept at 0.0s")
+            return
+
         if fmt in ("bullet", "ultra_bullet"):
             self.max_paced_move_delay = getattr(settings, "pacing_buffer_max_delay_bullet", 4.0)
         elif fmt == "blitz":
@@ -153,8 +161,8 @@ class PacedMoveStreamer:
                     # Catch-up complete: all subsequent buffered moves MUST be paced
                     is_initial_catchup = False
 
-                    # For FIDE broadcasts (max_delay <= 0), emit immediately
-                    if self.max_paced_move_delay <= 0.0:
+                    # For FIDE broadcasts (is_broadcast or max_delay <= 0), emit immediately
+                    if self.is_broadcast or self.max_paced_move_delay <= 0.0:
                         last_emit_wall_time = time.monotonic()
                         self._last_fen = event.fen
                         yield event

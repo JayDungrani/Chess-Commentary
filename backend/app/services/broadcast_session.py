@@ -7,7 +7,7 @@ import logging
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional, Tuple
@@ -32,12 +32,14 @@ from app.lichess.broadcast_streamer import (
     LichessBroadcastStreamer,
     split_pgn_blocks,
     extract_game_id_from_game,
+    parse_clock_seconds,
 )
 from app.lichess.pacing_buffer import PacedMoveStreamer
 from app.lichess.pgn_parser import (
     ChessStateTracker,
     GameMetadata,
     PlayerInfo,
+    ParsedMoveEvent,
     GameTerminationEvent,
     PonderingEvent,
 )
@@ -87,6 +89,7 @@ class InitialGameStatus:
     winner: Optional[str]
     result_code: str
     termination_reason: str
+    initial_moves: list[ParsedMoveEvent] = field(default_factory=list)
 
 
 class BroadcastFrame(BaseModel):
@@ -118,6 +121,9 @@ COLOR_MAP = {
 
 def matches_broadcast_game(game: chess.pgn.Game, target: str) -> bool:
     target_clean = target.strip().rstrip("/").split("/")[-1].lower()
+
+    if target_clean == extract_game_id_from_game(game).lower():
+        return True
 
     game_url = game.headers.get("GameURL", "").lower()
     if target_clean in game_url:
@@ -417,10 +423,56 @@ class BroadcastSession:
                         board = game.board()
                         ply = 0
                         curr = game
+                        initial_moves: list[ParsedMoveEvent] = []
+                        white_name = headers_dict.get("White", "White")
+                        black_name = headers_dict.get("Black", "Black")
+                        prev_w_clk: Optional[float] = None
+                        prev_b_clk: Optional[float] = None
+
                         while curr.variations:
                             curr = curr.variation(0)
-                            board.push(curr.move)
+                            move = curr.move
                             ply += 1
+
+                            turn_str = "white" if board.turn == chess.WHITE else "black"
+                            acting = white_name if turn_str == "white" else black_name
+                            san = board.san(move)
+                            uci = move.uci()
+                            board.push(move)
+
+                            clk = parse_clock_seconds(curr.comment)
+                            w_clk = clk if turn_str == "white" else prev_w_clk
+                            b_clk = clk if turn_str == "black" else prev_b_clk
+
+                            move_time = 0.0
+                            if turn_str == "white" and prev_w_clk is not None and clk is not None:
+                                move_time = max(0.0, prev_w_clk - clk)
+                            elif turn_str == "black" and prev_b_clk is not None and clk is not None:
+                                move_time = max(0.0, prev_b_clk - clk)
+
+                            if turn_str == "white" and clk is not None:
+                                prev_w_clk = clk
+                            elif turn_str == "black" and clk is not None:
+                                prev_b_clk = clk
+
+                            initial_moves.append(
+                                ParsedMoveEvent(
+                                    ply=ply,
+                                    turn=turn_str,
+                                    acting_player=acting,
+                                    san=san,
+                                    uci=uci,
+                                    fen=board.fen(),
+                                    white_clock_seconds=w_clk,
+                                    black_clock_seconds=b_clk,
+                                    move_time_spent_seconds=move_time,
+                                    is_check=board.is_check(),
+                                    is_checkmate=board.is_checkmate(),
+                                    is_stalemate=board.is_stalemate(),
+                                    is_draw=board.is_game_over() and not board.is_checkmate(),
+                                    is_time_trouble=False,
+                                )
+                            )
 
                         w_elo = int(headers_dict["WhiteElo"]) if headers_dict.get("WhiteElo", "").isdigit() else None
                         b_elo = int(headers_dict["BlackElo"]) if headers_dict.get("BlackElo", "").isdigit() else None
@@ -470,9 +522,10 @@ class BroadcastSession:
                             winner=winner,
                             result_code=result,
                             termination_reason=reason,
+                            initial_moves=initial_moves,
                         )
             except Exception as exc:
-                logger.debug(f"Broadcast initial inspection error: {exc}")
+                logger.warning(f"Broadcast initial inspection error: {exc}", exc_info=True)
                 return None
         else:
             url = f"https://lichess.org/api/game/{self.game_id}?moves=true&tags=true"
@@ -492,9 +545,34 @@ class BroadcastSession:
                 ply = len(moves)
 
                 board = chess.Board()
-                for m_str in moves:
+                initial_moves: list[ParsedMoveEvent] = []
+                white_name = metadata.white_player.username
+                black_name = metadata.black_player.username
+                for idx, m_str in enumerate(moves):
                     try:
-                        board.push_san(m_str)
+                        turn_str = "white" if board.turn == chess.WHITE else "black"
+                        acting = white_name if turn_str == "white" else black_name
+                        move = board.parse_san(m_str)
+                        uci = move.uci()
+                        board.push(move)
+                        initial_moves.append(
+                            ParsedMoveEvent(
+                                ply=idx + 1,
+                                turn=turn_str,
+                                acting_player=acting,
+                                san=m_str,
+                                uci=uci,
+                                fen=board.fen(),
+                                white_clock_seconds=None,
+                                black_clock_seconds=None,
+                                move_time_spent_seconds=0.0,
+                                is_check=board.is_check(),
+                                is_checkmate=board.is_checkmate(),
+                                is_stalemate=board.is_stalemate(),
+                                is_draw=board.is_game_over() and not board.is_checkmate(),
+                                is_time_trouble=False,
+                            )
+                        )
                     except Exception:
                         break
 
@@ -516,6 +594,7 @@ class BroadcastSession:
                     winner=winner,
                     result_code=result_code,
                     termination_reason=reason,
+                    initial_moves=initial_moves,
                 )
             except Exception as exc:
                 logger.debug(f"Casual game initial inspection error: {exc}")
@@ -670,9 +749,20 @@ class BroadcastSession:
                     event_type=BroadcastEventType.METADATA,
                     game_id=self.game_id,
                     round_id=self.round_id,
-                    fen=init_check.current_fen,
+                    fen=chess.STARTING_FEN,
                     metadata=init_check.metadata,
                 )
+
+                for mv in getattr(init_check, "initial_moves", []):
+                    yield BroadcastFrame(
+                        event_type=BroadcastEventType.MOVE,
+                        game_id=self.game_id,
+                        round_id=self.round_id,
+                        ply=mv.ply,
+                        fen=mv.fen,
+                        turn=mv.turn,
+                        move=mv,
+                    )
 
                 closing_exchange = await self._generate_closing_commentary(
                     winner=init_check.winner,
@@ -712,8 +802,8 @@ class BroadcastSession:
 
         print(f"{C_DIM}>>> Connecting to stream...{C_RESET}")
 
-        is_live_event = bool(self.round_id and not self.replay_all)
-        max_delay = 0.0 if is_live_event else settings.max_paced_move_delay_seconds
+        is_broadcast_game = bool(self.round_id)
+        max_delay = 0.0 if is_broadcast_game else settings.max_paced_move_delay_seconds
 
         white_name = "White"
         black_name = "Black"
@@ -727,6 +817,7 @@ class BroadcastSession:
             max_paced_move_delay_seconds=max_delay,
             target_live_ply=target_start_ply,
             game_format=game_speed,
+            is_broadcast=is_broadcast_game,
         )
 
         try:
@@ -746,7 +837,7 @@ class BroadcastSession:
 
                     self.analyzer.reset()
                     self.director.reset(game_format=game_speed)
-                    if not is_live_event and hasattr(self.paced_streamer, "set_game_format"):
+                    if not is_broadcast_game and hasattr(self.paced_streamer, "set_game_format"):
                         self.paced_streamer.set_game_format(game_speed)
 
                     yield BroadcastFrame(
@@ -851,6 +942,16 @@ class BroadcastSession:
                             self.analyzer.board.set_fen(event.fen)
 
                         print(f"\r{C_DIM}>>> [SYNC] Fast-syncing: {event.san:<6} (Ply {event.ply}/{target_start_ply})...{C_RESET}", end="", flush=True)
+
+                        yield BroadcastFrame(
+                            event_type=BroadcastEventType.MOVE,
+                            game_id=self.game_id,
+                            round_id=self.round_id,
+                            ply=event.ply,
+                            fen=event.fen,
+                            turn=event.turn,
+                            move=event,
+                        )
                         continue
 
                     elif target_start_ply > 1 and event.ply == (target_start_ply - 1):
@@ -869,6 +970,16 @@ class BroadcastSession:
                         print(f"\r{C_DIM}>>> [SYNC] Priming engine baseline on Ply {event.ply}...{C_RESET}", end="", flush=True)
                         self.analyzer.previous_analysis = await self.analyzer.engine.analyze_position(event.fen)
                         self.analyzer.previous_move = current_move
+
+                        yield BroadcastFrame(
+                            event_type=BroadcastEventType.MOVE,
+                            game_id=self.game_id,
+                            round_id=self.round_id,
+                            ply=event.ply,
+                            fen=event.fen,
+                            turn=event.turn,
+                            move=event,
+                        )
                         continue
 
                     print(f"\r" + " " * 75 + "\r", end="", flush=True)

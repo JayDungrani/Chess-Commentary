@@ -1,6 +1,5 @@
-// src/App.tsx
-
 import React, { useState } from 'react';
+import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { LandingView } from './views/LandingView';
 import { StudioView } from './views/StudioView';
 import { EventRoundView } from './views/EventRoundView';
@@ -17,8 +16,9 @@ type ViewState =
   | { type: 'event'; roundId: string; enableTts: boolean; replayAll: boolean }
   | { type: 'studio'; gameId: string; roundId?: string; enableTts: boolean; replayAll: boolean };
 
-export const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [viewState, setViewState] = useState<ViewState>({ type: 'landing' });
+  const { isDark } = useTheme();
 
   // Handle entry from LandingView
   const handleStartBroadcast = (config: BroadcastConfig) => {
@@ -69,7 +69,11 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="w-full h-screen h-[100dvh] max-h-screen bg-[#0a0c10] text-stone-100 flex flex-col overflow-hidden">
+    <div
+      className={`w-full h-screen h-[100dvh] max-h-screen flex flex-col overflow-hidden transition-colors duration-200 ${
+        isDark ? 'bg-[#0b0c0f] text-neutral-100' : 'bg-[#f5f6f9] text-neutral-900'
+      }`}
+    >
       {viewState.type === 'landing' && (
         <LandingView onStartBroadcast={handleStartBroadcast} />
       )}
@@ -92,6 +96,14 @@ export const App: React.FC = () => {
         />
       )}
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
   );
 };
 

@@ -66,23 +66,23 @@ export function getClassificationStyles(classification?: MoveClassification): {
 } {
   switch (classification) {
     case 'BRILLIANT':
-      return { bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/50' };
+      return { bg: 'bg-[#e05338]/20', text: 'text-[#e05338]', border: 'border-[#e05338]/50' };
     case 'BEST':
-      return { bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/50' };
+      return { bg: 'bg-emerald-500/20', text: 'text-emerald-500', border: 'border-emerald-500/40' };
     case 'EXCELLENT':
-      return { bg: 'bg-green-500/20', text: 'text-green-400', border: 'border-green-500/50' };
+      return { bg: 'bg-green-500/20', text: 'text-green-500', border: 'border-green-500/40' };
     case 'GOOD':
-      return { bg: 'bg-blue-500/20', text: 'text-blue-400', border: 'border-blue-500/50' };
+      return { bg: 'bg-blue-500/20', text: 'text-blue-500', border: 'border-blue-500/40' };
     case 'BOOK':
-      return { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/50' };
+      return { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/40' };
     case 'INACCURACY':
-      return { bg: 'bg-yellow-500/20', text: 'text-yellow-400', border: 'border-yellow-500/50' };
+      return { bg: 'bg-yellow-500/20', text: 'text-yellow-500', border: 'border-yellow-500/40' };
     case 'MISTAKE':
-      return { bg: 'bg-orange-500/20', text: 'text-orange-400', border: 'border-orange-500/50' };
+      return { bg: 'bg-orange-500/20', text: 'text-orange-500', border: 'border-orange-500/40' };
     case 'BLUNDER':
-      return { bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/50' };
+      return { bg: 'bg-red-500/20', text: 'text-red-500', border: 'border-red-500/50' };
     default:
-      return { bg: 'bg-slate-700/20', text: 'text-slate-300', border: 'border-slate-600/50' };
+      return { bg: 'bg-neutral-500/10', text: 'text-neutral-400', border: 'border-neutral-500/30' };
   }
 }
 
@@ -92,7 +92,7 @@ export function getClassificationStyles(classification?: MoveClassification): {
 export function getEmotionBadge(emotion: CommentaryEmotion): { label: string; color: string } {
   switch (emotion) {
     case 'excited':
-      return { label: '🔥 Excited', color: 'text-amber-400 border-amber-500/30' };
+      return { label: '🔥 Excited', color: 'text-[#e05338] border-[#e05338]/30' };
     case 'shocked':
       return { label: '⚡ Shocked', color: 'text-rose-400 border-rose-500/30' };
     case 'tense':
@@ -103,6 +103,6 @@ export function getEmotionBadge(emotion: CommentaryEmotion): { label: string; co
       return { label: '😄 Humorous', color: 'text-yellow-400 border-yellow-500/30' };
     case 'neutral':
     default:
-      return { label: '🎙️ Play-by-Play', color: 'text-slate-400 border-slate-700' };
+      return { label: '🎙️ Play-by-Play', color: 'text-neutral-400 border-neutral-500/30' };
   }
 }

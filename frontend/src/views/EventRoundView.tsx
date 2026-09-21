@@ -1,5 +1,3 @@
-// src/views/EventRoundView.tsx
-
 import React, { useEffect, useState, useMemo } from 'react';
 import {
   Trophy,
@@ -15,6 +13,8 @@ import {
 import { Chessboard } from 'react-chessboard';
 import type { BroadcastGameSummary } from '../types/broadcast';
 import { CountryFlag } from '../components/common/CountryFlag';
+import { ThemeToggle } from '../components/common/ThemeToggle';
+import { useTheme } from '../context/ThemeContext';
 
 interface EventRoundViewProps {
   roundId: string;
@@ -27,6 +27,7 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
   onSelectGame,
   onBack,
 }) => {
+  const { isDark } = useTheme();
   const [games, setGames] = useState<BroadcastGameSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,32 +78,54 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
   }, [games, searchQuery]);
 
   return (
-    <div className="h-screen h-[100dvh] max-h-screen w-full bg-[#0a0c10] text-stone-100 flex flex-col justify-between overflow-hidden select-none">
+    <div
+      className={`h-screen h-[100dvh] max-h-screen w-full flex flex-col justify-between overflow-hidden select-none transition-colors duration-200 ${
+        isDark ? 'bg-[#0b0c0f] text-neutral-100' : 'bg-[#f5f6f9] text-neutral-900'
+      }`}
+    >
       {/* 1. Header Bar */}
-      <header className="shrink-0 bg-[#10131a] border-b border-stone-800/90 px-4 py-3 flex items-center justify-between shadow-lg z-30">
+      <header
+        className={`shrink-0 border-b px-4 py-3 flex items-center justify-between shadow-sm z-30 transition-colors duration-200 ${
+          isDark ? 'bg-[#13151b] border-white/[0.08]' : 'bg-white border-neutral-200'
+        }`}
+      >
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="p-1.5 rounded-lg bg-[#181c26] hover:bg-stone-800 text-stone-400 hover:text-stone-100 border border-stone-800 transition-colors"
+            className={`p-1.5 rounded-lg border transition-colors ${
+              isDark
+                ? 'bg-[#181c26] hover:bg-neutral-800 text-neutral-400 hover:text-neutral-100 border-white/[0.08]'
+                : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-600 hover:text-neutral-900 border-neutral-200'
+            }`}
             title="Back to Home"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
 
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
+            <div className="p-2 rounded-xl bg-[#e05338]/10 border border-[#e05338]/25 text-[#e05338]">
               <Trophy className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="font-bold text-base text-stone-100 tracking-tight">
+                <h1
+                  className={`font-bold text-base tracking-tight ${
+                    isDark ? 'text-neutral-100' : 'text-neutral-900'
+                  }`}
+                >
                   Tournament Round Broadcast
                 </h1>
-                <span className="text-[10px] font-mono font-bold bg-[#181c26] text-amber-300 px-2 py-0.5 rounded border border-stone-700">
+                <span
+                  className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                    isDark
+                      ? 'bg-[#181c26] text-[#e05338] border-white/[0.08]'
+                      : 'bg-neutral-100 text-[#e05338] border-neutral-200'
+                  }`}
+                >
                   ROUND {roundId.slice(0, 8)}
                 </span>
               </div>
-              <p className="text-[11px] text-stone-400 font-mono">
+              <p className={`text-[11px] font-mono ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
                 {games.length} Board Pairings Loaded
               </p>
             </div>
@@ -113,26 +136,36 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
         <div className="flex items-center gap-3">
           {/* Search bar */}
           <div className="relative hidden sm:block">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" />
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Filter players or board..."
-              className="bg-[#181c26] border border-stone-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-stone-200 placeholder-stone-600 focus:outline-none focus:border-amber-400/80 font-mono w-48 sm:w-64"
+              className={`border rounded-lg pl-8 pr-3 py-1.5 text-xs font-mono w-48 sm:w-64 focus:outline-none focus:border-[#e05338] transition-colors ${
+                isDark
+                  ? 'bg-[#0b0c0f] border-white/[0.08] text-neutral-200 placeholder-neutral-500'
+                  : 'bg-neutral-50 border-neutral-300 text-neutral-800 placeholder-neutral-400'
+              }`}
             />
           </div>
 
-          {/* Refresh Button */}
+          {/* Refresh button */}
           <button
-            onClick={() => fetchRoundGames(false)}
+            onClick={() => fetchRoundGames()}
             disabled={isRefreshing}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#181c26] hover:bg-stone-800 text-stone-300 border border-stone-800 text-xs font-semibold transition-all disabled:opacity-50"
-            title="Refresh round boards"
+            className={`p-2 rounded-lg border transition-colors disabled:opacity-50 ${
+              isDark
+                ? 'bg-[#181c26] hover:bg-neutral-800 text-neutral-400 hover:text-white border-white/[0.08]'
+                : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-600 hover:text-neutral-900 border-neutral-200'
+            }`}
+            title="Refresh pairings"
           >
-            <RotateCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-amber-400' : ''}`} />
-            <span className="hidden md:inline">Refresh</span>
+            <RotateCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-[#e05338]' : ''}`} />
           </button>
+
+          {/* Theme Toggle */}
+          <ThemeToggle showLabel={false} />
         </div>
       </header>
 
@@ -140,22 +173,22 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
       <main className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-6">
         <div className="max-w-7xl mx-auto">
           {loading ? (
-            <div className="h-96 flex flex-col items-center justify-center gap-3 text-stone-400">
-              <RotateCw className="w-7 h-7 animate-spin text-amber-400" />
+            <div className={`h-96 flex flex-col items-center justify-center gap-3 ${isDark ? 'text-neutral-400' : 'text-neutral-600'}`}>
+              <RotateCw className="w-7 h-7 animate-spin text-[#e05338]" />
               <p className="text-sm font-mono">Loading tournament boards from Lichess relay...</p>
             </div>
           ) : error ? (
             <div className="h-96 flex flex-col items-center justify-center gap-3 text-center">
-              <p className="text-rose-400 text-sm font-semibold">{error}</p>
+              <p className="text-[#e05338] text-sm font-semibold">{error}</p>
               <button
                 onClick={() => fetchRoundGames()}
-                className="px-4 py-2 bg-amber-500 text-stone-950 font-bold rounded-lg text-xs"
+                className="px-4 py-2 bg-[#e05338] hover:bg-[#eb5e43] text-white font-bold rounded-lg text-xs transition-colors"
               >
                 Try Again
               </button>
             </div>
           ) : filteredGames.length === 0 ? (
-            <div className="h-96 flex flex-col items-center justify-center gap-2 text-stone-500 text-sm">
+            <div className={`h-96 flex flex-col items-center justify-center gap-2 text-sm ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>
               <Users className="w-8 h-8 opacity-40" />
               <p>No tournament pairings match your filter.</p>
             </div>
@@ -182,22 +215,36 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
                   <div
                     key={cardKey}
                     onClick={() => onSelectGame(gameId)}
-                    className="group relative bg-[#12151d] hover:bg-[#161a24] border border-stone-800 hover:border-amber-500/50 rounded-2xl p-4 transition-all duration-200 shadow-lg cursor-pointer flex flex-col justify-between"
+                    className={`group relative rounded-2xl p-4 transition-all duration-200 border cursor-pointer flex flex-col justify-between ${
+                      isDark
+                        ? 'bg-[#13151b] hover:bg-[#181c26] border-white/[0.08] hover:border-[#e05338]/50 shadow-lg'
+                        : 'bg-white hover:bg-neutral-50 border-black/[0.08] hover:border-[#e05338]/50 shadow-sm'
+                    }`}
                   >
                     {/* Top: Board number & Game Status */}
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-stone-900 border border-stone-800 text-stone-300">
+                      <span
+                        className={`text-xs font-mono font-bold px-2 py-0.5 rounded border ${
+                          isDark
+                            ? 'bg-[#0b0c0f] border-white/[0.06] text-neutral-300'
+                            : 'bg-neutral-100 border-neutral-200 text-neutral-700'
+                        }`}
+                      >
                         BOARD {boardNum}
                       </span>
 
                       {isOngoing ? (
-                        <span className="flex items-center gap-1.5 text-[11px] font-bold text-rose-400 font-mono">
-                          <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                        <span className="flex items-center gap-1.5 text-[11px] font-bold text-[#e05338] font-mono">
+                          <span className="w-2 h-2 rounded-full bg-[#e05338] animate-pulse" />
                           LIVE
                         </span>
                       ) : (
-                        <span className="flex items-center gap-1 text-[11px] font-mono text-stone-400 font-semibold">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-stone-500" />
+                        <span
+                          className={`flex items-center gap-1 text-[11px] font-mono font-semibold ${
+                            isDark ? 'text-neutral-400' : 'text-neutral-500'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 text-neutral-500" />
                           {game.result && game.result !== '*' ? game.result : (game.status || 'Finished')}
                         </span>
                       )}
@@ -206,7 +253,11 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
                     {/* Middle: Mini Chessboard Preview & Match Details */}
                     <div className="flex items-center gap-3 my-1">
                       {/* Mini Board thumbnail */}
-                      <div className="w-24 h-24 shrink-0 rounded-lg overflow-hidden border border-stone-800/80 pointer-events-none">
+                      <div
+                        className={`w-24 h-24 shrink-0 rounded-lg overflow-hidden border pointer-events-none ${
+                          isDark ? 'border-white/[0.08]' : 'border-neutral-200'
+                        }`}
+                      >
                         <Chessboard
                           position={fen}
                           boardWidth={96}
@@ -221,19 +272,27 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
                         {/* White Player */}
                         <div className="flex items-center justify-between text-xs">
                           <div className="flex items-center gap-1.5 truncate">
-                            <span className="w-2.5 h-2.5 rounded-sm bg-stone-200 border border-stone-400 shrink-0" />
+                            <span className="w-2.5 h-2.5 rounded-sm bg-neutral-100 border border-neutral-300 shrink-0" />
                             <CountryFlag countryCode={whiteFed} playerName={whiteName} />
                             {whiteTitle && (
-                              <span className="bg-amber-500/15 text-amber-300 text-[9px] font-bold px-1 rounded border border-amber-500/30">
+                              <span className="bg-[#e05338]/15 text-[#e05338] text-[9px] font-bold px-1 rounded border border-[#e05338]/30">
                                 {whiteTitle}
                               </span>
                             )}
-                            <span className="font-semibold text-stone-200 truncate">
+                            <span
+                              className={`font-semibold truncate ${
+                                isDark ? 'text-neutral-200' : 'text-neutral-800'
+                              }`}
+                            >
                               {whiteName}
                             </span>
                           </div>
                           {whiteRating && (
-                            <span className="text-[11px] font-mono text-stone-400 shrink-0 ml-1">
+                            <span
+                              className={`text-[11px] font-mono shrink-0 ml-1 ${
+                                isDark ? 'text-neutral-500' : 'text-neutral-400'
+                              }`}
+                            >
                               {whiteRating}
                             </span>
                           )}
@@ -242,19 +301,27 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
                         {/* Black Player */}
                         <div className="flex items-center justify-between text-xs">
                           <div className="flex items-center gap-1.5 truncate">
-                            <span className="w-2.5 h-2.5 rounded-sm bg-stone-800 border border-stone-600 shrink-0" />
+                            <span className="w-2.5 h-2.5 rounded-sm bg-neutral-800 border border-neutral-600 shrink-0" />
                             <CountryFlag countryCode={blackFed} playerName={blackName} />
                             {blackTitle && (
-                              <span className="bg-amber-500/15 text-amber-300 text-[9px] font-bold px-1 rounded border border-amber-500/30">
+                              <span className="bg-[#e05338]/15 text-[#e05338] text-[9px] font-bold px-1 rounded border border-[#e05338]/30">
                                 {blackTitle}
                               </span>
                             )}
-                            <span className="font-semibold text-stone-200 truncate">
+                            <span
+                              className={`font-semibold truncate ${
+                                isDark ? 'text-neutral-200' : 'text-neutral-800'
+                              }`}
+                            >
                               {blackName}
                             </span>
                           </div>
                           {blackRating && (
-                            <span className="text-[11px] font-mono text-stone-400 shrink-0 ml-1">
+                            <span
+                              className={`text-[11px] font-mono shrink-0 ml-1 ${
+                                isDark ? 'text-neutral-500' : 'text-neutral-400'
+                              }`}
+                            >
                               {blackRating}
                             </span>
                           )}
@@ -263,12 +330,16 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
                     </div>
 
                     {/* Bottom: Action CTA */}
-                    <div className="mt-3 pt-2.5 border-t border-stone-800/80 flex items-center justify-between">
-                      <span className="text-[11px] font-mono text-stone-500">
+                    <div
+                      className={`mt-3 pt-2.5 border-t flex items-center justify-between ${
+                        isDark ? 'border-white/[0.06]' : 'border-black/[0.06]'
+                      }`}
+                    >
+                      <span className="text-[11px] font-mono text-neutral-500">
                         {game.lastMove ? `Last: ${game.lastMove}` : (game.ply_count ? `Move ${Math.floor((game.ply_count + 1) / 2)}` : 'Ready')}
                       </span>
-                      <div className="flex items-center gap-1 text-xs font-bold text-amber-400 group-hover:text-amber-300 transition-colors">
-                        <Radio className="w-3.5 h-3.5" />
+                      <div className="flex items-center gap-1 text-xs font-bold text-[#e05338] group-hover:opacity-80 transition-opacity">
+                        <Radio className="w-3.5 h-3.5 text-[#e05338]" />
                         <span>Tune In</span>
                       </div>
                     </div>
@@ -281,9 +352,13 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
       </main>
 
       {/* 3. Footer */}
-      <footer className="shrink-0 max-w-7xl mx-auto w-full py-2.5 px-4 text-center text-xs text-stone-500 border-t border-stone-800/80 flex items-center justify-between">
+      <footer
+        className={`shrink-0 max-w-7xl mx-auto w-full py-2.5 px-4 text-center text-xs border-t flex items-center justify-between transition-colors duration-200 ${
+          isDark ? 'border-white/[0.06] text-neutral-500' : 'border-black/[0.06] text-neutral-500'
+        }`}
+      >
         <span className="font-mono text-[11px]">Event Broadcast Engine Active</span>
-        <div className="flex items-center gap-4 text-stone-500 text-[11px]">
+        <div className="flex items-center gap-4 text-[11px]">
           <span>Auto-updates live</span>
         </div>
       </footer>

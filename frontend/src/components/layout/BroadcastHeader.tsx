@@ -12,6 +12,8 @@ import {
   LayoutGrid,
 } from 'lucide-react';
 import { type GameMetadata } from '../../types/broadcast';
+import { ThemeToggle } from '../common/ThemeToggle';
+import { useTheme } from '../../context/ThemeContext';
 
 interface BroadcastHeaderProps {
   metadata?: GameMetadata | null;
@@ -37,39 +39,62 @@ export const BroadcastHeader: React.FC<BroadcastHeaderProps> = ({
   boardOrientation,
   onFlipBoard,
 }) => {
+  const { isDark } = useTheme();
   const eventName = metadata?.event_name || 'Live Match Broadcast';
   const speed = metadata?.speed ? metadata.speed.toUpperCase() : 'LIVE';
   const whiteName = metadata?.white_player?.username || 'White';
   const blackName = metadata?.black_player?.username || 'Black';
 
   return (
-    <header className="w-full bg-[#10131a] border-b border-stone-800/90 px-3 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between shadow-lg z-30 select-none">
+    <header
+      className={`w-full border-b px-3 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between shadow-sm z-30 select-none transition-colors duration-200 ${
+        isDark ? 'bg-[#13151b] border-white/[0.08]' : 'bg-white border-neutral-200'
+      }`}
+    >
       {/* Left: Exit button & Match branding */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         <button
           onClick={onExit}
-          className="p-1.5 rounded-lg bg-[#181c26] hover:bg-stone-800 text-stone-400 hover:text-stone-100 border border-stone-800 transition-colors shrink-0"
+          className={`p-1.5 rounded-lg border transition-colors shrink-0 ${
+            isDark
+              ? 'bg-[#181c26] hover:bg-neutral-800 text-neutral-400 hover:text-neutral-100 border-white/[0.08]'
+              : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-600 hover:text-neutral-900 border-neutral-200'
+          }`}
           title="Exit Broadcast Studio"
         >
           <ArrowLeft className="w-4 h-4" />
         </button>
 
         <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
-          <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
+          <div className="p-1.5 rounded-lg bg-[#e05338]/10 border border-[#e05338]/25 text-[#e05338] shrink-0">
             <Trophy className="w-4 h-4" />
           </div>
 
           <div className="flex flex-col min-w-0">
             <div className="flex items-center gap-1.5 sm:gap-2">
-              <h1 className="font-bold text-xs sm:text-sm text-stone-100 truncate tracking-tight">
+              <h1
+                className={`font-bold text-xs sm:text-sm truncate tracking-tight ${
+                  isDark ? 'text-neutral-100' : 'text-neutral-900'
+                }`}
+              >
                 {eventName}
               </h1>
-              <span className="text-[9px] sm:text-[10px] font-mono font-bold bg-[#181c26] text-amber-300 px-1.5 py-0.2 rounded border border-stone-700 shrink-0">
+              <span
+                className={`text-[9px] sm:text-[10px] font-mono font-bold px-1.5 py-0.2 rounded border shrink-0 ${
+                  isDark
+                    ? 'bg-[#181c26] text-[#e05338] border-white/[0.08]'
+                    : 'bg-neutral-100 text-[#e05338] border-neutral-200'
+                }`}
+              >
                 {speed}
               </span>
             </div>
             {metadata && (
-              <p className="text-[10px] sm:text-[11px] text-stone-400 truncate">
+              <p
+                className={`text-[10px] sm:text-[11px] truncate ${
+                  isDark ? 'text-neutral-400' : 'text-neutral-500'
+                }`}
+              >
                 {whiteName} vs {blackName}
               </p>
             )}
@@ -78,29 +103,39 @@ export const BroadcastHeader: React.FC<BroadcastHeaderProps> = ({
       </div>
 
       {/* Center: Live Broadcast Status Pill */}
-      <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-[#0a0c10] border border-stone-800 shadow-inner">
+      <div
+        className={`hidden lg:flex items-center gap-2 px-3 py-1 rounded-full border shadow-inner ${
+          isDark ? 'bg-[#0b0c0f] border-white/[0.08]' : 'bg-neutral-100 border-neutral-200'
+        }`}
+      >
         {status === 'connected' && (
           <>
-            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-            <span className="text-xs font-bold text-rose-400 tracking-wider">LIVE ON AIR</span>
+            <span className="w-2 h-2 rounded-full bg-[#e05338] animate-pulse" />
+            <span className="text-xs font-bold text-[#e05338] tracking-wider">LIVE ON AIR</span>
           </>
         )}
         {status === 'connecting' && (
           <>
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <span className="text-xs font-bold text-amber-400 tracking-wider">CONNECTING</span>
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            <span className="text-xs font-bold text-amber-500 tracking-wider">CONNECTING</span>
           </>
         )}
         {status === 'ended' && (
           <>
-            <span className="w-2 h-2 rounded-full bg-stone-500" />
-            <span className="text-xs font-bold text-stone-400 tracking-wider">CONCLUDED</span>
+            <span className="w-2 h-2 rounded-full bg-neutral-400" />
+            <span
+              className={`text-xs font-bold tracking-wider ${
+                isDark ? 'text-neutral-400' : 'text-neutral-500'
+              }`}
+            >
+              CONCLUDED
+            </span>
           </>
         )}
         {status === 'error' && (
           <>
-            <span className="w-2 h-2 rounded-full bg-rose-500" />
-            <span className="text-xs font-bold text-rose-400 tracking-wider">RECONNECTING</span>
+            <span className="w-2 h-2 rounded-full bg-[#e05338]" />
+            <span className="text-xs font-bold text-[#e05338] tracking-wider">RECONNECTING</span>
           </>
         )}
       </div>
@@ -111,10 +146,14 @@ export const BroadcastHeader: React.FC<BroadcastHeaderProps> = ({
         {metadata?.round_id && (
           <button
             onClick={onExit}
-            className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border border-stone-800 bg-[#181c26] hover:bg-stone-800 text-stone-300 hover:text-stone-100 text-xs font-semibold transition-all"
+            className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+              isDark
+                ? 'border-white/[0.08] bg-[#181c26] hover:bg-neutral-800 text-neutral-300 hover:text-white'
+                : 'border-neutral-200 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 hover:text-neutral-900'
+            }`}
             title="View all pairings in this round"
           >
-            <LayoutGrid className="w-3.5 h-3.5 text-amber-400" />
+            <LayoutGrid className="w-3.5 h-3.5 text-[#e05338]" />
             <span className="hidden md:inline">Round Boards</span>
           </button>
         )}
@@ -122,38 +161,59 @@ export const BroadcastHeader: React.FC<BroadcastHeaderProps> = ({
         {/* Flip Board Orientation */}
         <button
           onClick={onFlipBoard}
-          className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border border-stone-800 bg-[#181c26] hover:bg-stone-800 text-stone-300 hover:text-stone-100 hover:border-stone-700 text-xs font-semibold transition-all"
+          className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+            isDark
+              ? 'border-white/[0.08] bg-[#181c26] hover:bg-neutral-800 text-neutral-300 hover:text-white'
+              : 'border-neutral-200 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 hover:text-neutral-900'
+          }`}
           title={`Flip Board (Currently ${boardOrientation === 'white' ? 'White' : 'Black'})`}
         >
-          <RotateCw className="w-3.5 h-3.5 text-stone-400" />
+          <RotateCw className={`w-3.5 h-3.5 ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`} />
           <span className="hidden sm:inline capitalize">{boardOrientation}</span>
         </button>
 
         {/* Toggle AI Voice Commentary (TTS) */}
         <button
           onClick={onToggleTts}
-          className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${enableTts
-              ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
-              : 'bg-[#181c26] border-stone-800 text-stone-500 hover:text-stone-400'
-            }`}
+          className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+            enableTts
+              ? 'bg-[#e05338]/15 border-[#e05338]/30 text-[#e05338] hover:bg-[#e05338]/20'
+              : isDark
+              ? 'bg-[#181c26] border-white/[0.08] text-neutral-500 hover:text-neutral-400'
+              : 'bg-neutral-100 border-neutral-200 text-neutral-400 hover:text-neutral-600'
+          }`}
           title={enableTts ? 'AI Voice Commentary Active' : 'AI Voice Generation Disabled'}
         >
-          {enableTts ? <Mic className="w-3.5 h-3.5 text-amber-400" /> : <MicOff className="w-3.5 h-3.5" />}
+          {enableTts ? (
+            <Mic className="w-3.5 h-3.5 text-[#e05338]" />
+          ) : (
+            <MicOff className="w-3.5 h-3.5" />
+          )}
           <span className="hidden sm:inline">AI Voice: {enableTts ? 'ON' : 'OFF'}</span>
         </button>
 
         {/* Radio Audio Mute / Unmute */}
         <button
           onClick={onToggleMute}
-          className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${!isMuted
-              ? 'bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700/80'
-              : 'bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/20'
-            }`}
+          className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+            !isMuted
+              ? isDark
+                ? 'bg-[#181c26] border-white/[0.08] text-neutral-200 hover:bg-neutral-800'
+                : 'bg-neutral-100 border-neutral-200 text-neutral-800 hover:bg-neutral-200'
+              : 'bg-[#e05338]/15 border-[#e05338]/30 text-[#e05338] hover:bg-[#e05338]/20'
+          }`}
           title={isMuted ? 'Unmute Commentary Audio' : 'Mute Commentary Audio'}
         >
-          {!isMuted ? <Volume2 className="w-4 h-4 text-amber-400" /> : <VolumeX className="w-4 h-4 text-rose-400" />}
+          {!isMuted ? (
+            <Volume2 className="w-4 h-4 text-[#e05338]" />
+          ) : (
+            <VolumeX className="w-4 h-4 text-[#e05338]" />
+          )}
           <span className="hidden sm:inline">{!isMuted ? 'RADIO ON' : 'MUTED'}</span>
         </button>
+
+        {/* Dark / Light Theme Toggle */}
+        <ThemeToggle showLabel={false} />
       </div>
     </header>
   );

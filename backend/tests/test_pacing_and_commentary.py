@@ -542,6 +542,73 @@ def test_temporal_phrasing_sanitizer():
     print("[PASS] Temporal phrasing correctly converts false present tense for upcoming opponent to modal 'can play'!")
 
 
+def test_broadcast_pacing_buffer_zero_delay():
+    print("\n--- 14. Testing Broadcast Zero Time Buffer across all categories ---")
+    # Broadcast streamer initialized with is_broadcast=True
+    streamer = PacedMoveStreamer(streamer=None, game_format="classical", is_broadcast=True)
+    assert streamer.max_paced_move_delay == 0.0, f"Expected 0.0s for broadcast, got {streamer.max_paced_move_delay}"
+    assert streamer.enable_pondering is False, f"Expected enable_pondering=False, got {streamer.enable_pondering}"
+
+    # Verify set_game_format does NOT override zero delay
+    for fmt in ("classical", "rapid", "blitz", "bullet"):
+        streamer.set_game_format(fmt)
+        assert streamer.max_paced_move_delay == 0.0, f"Expected 0.0s after setting {fmt}, got {streamer.max_paced_move_delay}"
+        assert streamer.enable_pondering is False
+
+    print("[PASS] Broadcast streamer enforces zero delay and disables pondering across all formats")
+
+
+def test_initial_moves_parsing_and_status():
+    print("\n--- 15. Testing InitialGameStatus and ParsedMoveEvent instantiation ---")
+    import io
+    import chess.pgn
+    from app.services.broadcast_session import InitialGameStatus, matches_broadcast_game
+    from app.lichess.pgn_parser import GameMetadata, PlayerInfo, ParsedMoveEvent
+
+    pgn_sample = """[Event "Test Round"]
+[Site "https://lichess.org/broadcast/test/game1234"]
+[Round "1.1"]
+[Board "1"]
+[White "Player One"]
+[Black "Player Two"]
+[Result "1-0"]
+
+1. e4 { [%clk 0:15:00] } 1... e5 { [%clk 0:14:55] } 2. Nf3 { [%clk 0:14:50] } 1-0
+"""
+    game = chess.pgn.read_game(io.StringIO(pgn_sample))
+    assert matches_broadcast_game(game, "game1234") is True
+    assert matches_broadcast_game(game, "1") is True
+
+    mv = ParsedMoveEvent(
+        ply=1,
+        turn="white",
+        uci="e2e4",
+        san="e4",
+        fen="rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+    )
+    assert mv.is_time_trouble is False
+
+    status = InitialGameStatus(
+        is_ended=True,
+        metadata=GameMetadata(
+            game_id="game1234",
+            speed="classical",
+            variant="standard",
+            rated=True,
+            white_player=PlayerInfo(username="Player One"),
+            black_player=PlayerInfo(username="Player Two"),
+        ),
+        current_ply=3,
+        current_fen="rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+        winner="white",
+        result_code="1-0",
+        termination_reason="1-0 - Player One wins",
+        initial_moves=[mv],
+    )
+    assert len(status.initial_moves) == 1
+    print("[PASS] InitialGameStatus and ParsedMoveEvent instantiated successfully!")
+
+
 if __name__ == "__main__":
     test_pacing_buffer_formats()
     test_director_think_classification()
@@ -556,4 +623,6 @@ if __name__ == "__main__":
     test_play_by_play_dynamic()
     test_pondering_cooldown_and_guards()
     test_temporal_phrasing_sanitizer()
+    test_broadcast_pacing_buffer_zero_delay()
+    test_initial_moves_parsing_and_status()
     print("\nALL VERIFICATION TESTS PASSED SUCCESSFULLY!")

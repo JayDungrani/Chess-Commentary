@@ -595,7 +595,7 @@ export const CountryFlag: React.FC<CountryFlagProps> = ({
   if (imgError) {
     return (
       <span
-        className={`inline-flex items-center text-[9px] font-mono font-bold text-stone-400 bg-[#181c26] px-1 py-0.5 rounded border border-stone-700/70 shrink-0 ${className}`}
+        className={`inline-flex items-center text-[9px] font-mono font-bold text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-[#181c26] px-1 py-0.5 rounded border border-neutral-300 dark:border-neutral-700 shrink-0 ${className}`}
         title={countryCode?.toUpperCase() || iso2.toUpperCase()}
       >
         {iso2.toUpperCase()}
@@ -612,7 +612,7 @@ export const CountryFlag: React.FC<CountryFlagProps> = ({
         src={`https://flagcdn.com/w40/${iso2}.png`}
         srcSet={`https://flagcdn.com/w80/${iso2}.png 2x`}
         alt={iso2.toUpperCase()}
-        className="w-[18px] h-[13px] object-cover rounded-[2px] shadow-sm border border-stone-700/60 transition-transform hover:scale-110"
+        className="w-[18px] h-[13px] object-cover rounded-[2px] shadow-sm border border-neutral-300 dark:border-neutral-700/60 transition-transform hover:scale-110"
         loading="lazy"
         onError={() => setImgError(true)}
       />

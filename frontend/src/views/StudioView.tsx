@@ -1,6 +1,6 @@
 // src/views/StudioView.tsx
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useBroadcastStream } from '../hooks/useBroadcastStream';
 import { useChessClock } from '../hooks/useChessClock';
 import { useAudioNarrator } from '../hooks/useAudioNarrator';
@@ -12,7 +12,8 @@ import { EvalBar } from '../components/board/EvalBar';
 import { PlayerCard } from '../components/board/PlayerCard';
 import { CommentaryStudio } from '../components/commentary/CommentaryStudio';
 import { MoveNavigator } from '../components/board/MoveNavigator';
-import type { MoveEvaluation, ParsedMoveEvent, VisualCue } from '../types/broadcast';
+import { useTheme } from '../context/ThemeContext';
+import type { MoveEvaluation, ParsedMoveEvent, VisualCue, BroadcastFrame } from '../types/broadcast';
 
 const DEFAULT_CHESS_START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -52,6 +53,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   replayAll = false,
   onExit,
 }) => {
+  const { isDark } = useTheme();
   const [enableTts, setEnableTts] = useState(initialEnableTts);
   const [boardOrientation, setBoardOrientation] = useState<'white' | 'black'>('white');
   const [boardHeight, setBoardHeight] = useState<number | undefined>(undefined);
@@ -62,6 +64,52 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [history, setHistory] = useState<MoveSnapshot[]>([]);
   const [inspectedPly, setInspectedPly] = useState<number | null>(null);
   const previousLatestPlyRef = useRef<number | null>(null);
+
+  // Initialize start position (ply 0) and reset on match/round change
+  useEffect(() => {
+    setHistory([
+      {
+        ply: 0,
+        fen: DEFAULT_CHESS_START_FEN,
+        move: null,
+        evaluation: null,
+        visualCues: null,
+      },
+    ]);
+    setInspectedPly(null);
+    previousLatestPlyRef.current = null;
+  }, [gameId, roundId]);
+
+  // Frame handler to immediately record all incoming moves into history
+  const handleFrame = useCallback((frame: BroadcastFrame) => {
+    if (frame.event_type === 'MOVE' && frame.ply != null && frame.fen) {
+      setHistory((prev) => {
+        const snapshot: MoveSnapshot = {
+          ply: frame.ply!,
+          fen: frame.fen!,
+          move: frame.move ?? null,
+          evaluation: frame.evaluation ?? null,
+          visualCues: frame.visual_cues || frame.evaluation?.visual_cues || null,
+        };
+
+        const existingIdx = prev.findIndex((s) => s.ply === frame.ply);
+        if (existingIdx >= 0) {
+          const updated = [...prev];
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            ...snapshot,
+            evaluation: snapshot.evaluation ?? updated[existingIdx].evaluation,
+            visualCues: snapshot.visualCues ?? updated[existingIdx].visualCues,
+          };
+          return updated;
+        }
+
+        const next = [...prev, snapshot];
+        next.sort((a, b) => a.ply - b.ply);
+        return next;
+      });
+    }
+  }, []);
 
   // 1. Audio and Radio Commentary Engine
   const {
@@ -93,47 +141,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
     tts: enableTts,
     autoConnect: true,
     autoPlayAudio: true,
+    onFrame: handleFrame,
   });
 
-  const activeFen = fen && fen.trim().length > 0 ? fen : DEFAULT_CHESS_START_FEN;
-
-  // Derive the actual side whose turn it is to move on the board
-  const liveActiveSide = useMemo(() => {
-    if (isGameOver) return null;
-    return getSideToMoveFromFen(activeFen);
-  }, [activeFen, isGameOver]);
-
-  // 3. Live Synchronized Clocks (driven by true side-to-move)
-  const {
-    whiteClock,
-    blackClock,
-    isWhiteTimeTrouble,
-    isBlackTimeTrouble,
-  } = useChessClock({
-    initialWhiteSeconds: currentMove?.white_clock_seconds,
-    initialBlackSeconds: currentMove?.black_clock_seconds,
-    activeTurn: liveActiveSide || turn,
-    isGameOver,
-  });
-
-  // Initialize start position (ply 0)
-  useEffect(() => {
-    setHistory((prev) => {
-      if (prev.some((s) => s.ply === 0)) return prev;
-      return [
-        {
-          ply: 0,
-          fen: DEFAULT_CHESS_START_FEN,
-          move: null,
-          evaluation: null,
-          visualCues: null,
-        },
-        ...prev,
-      ];
-    });
-  }, []);
-
-  // Record snapshots & automatically snap to live when a new move arrives
+  // Automatically snap to live when a new forward move arrives during live play
   useEffect(() => {
     if (!currentMove) return;
     const ply = currentMove.ply;
@@ -142,25 +153,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       setInspectedPly(null);
     }
     previousLatestPlyRef.current = ply;
-
-    setHistory((prev) => {
-      const existingIdx = prev.findIndex((s) => s.ply === ply);
-      const snapshot: MoveSnapshot = {
-        ply,
-        fen: fen || DEFAULT_CHESS_START_FEN,
-        move: currentMove,
-        evaluation: evaluation ?? null,
-        visualCues: visualCues ?? null,
-      };
-
-      if (existingIdx >= 0) {
-        const updated = [...prev];
-        updated[existingIdx] = snapshot;
-        return updated;
-      }
-      return [...prev, snapshot].sort((a, b) => a.ply - b.ply);
-    });
-  }, [currentMove?.ply, currentMove?.uci, fen]);
+  }, [currentMove?.ply]);
 
   // Update evaluation & arrows for current move when analysis finishes
   useEffect(() => {
@@ -181,9 +174,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
       }
       return prev;
     });
-  }, [evaluation, visualCues]);
+  }, [evaluation, visualCues, currentMove?.ply]);
 
-  const latestPly = currentMove?.ply ?? 0;
+  const latestPly = useMemo(() => {
+    let max = currentMove?.ply ?? 0;
+    for (const snap of history) {
+      if (snap.ply > max) max = snap.ply;
+    }
+    return max;
+  }, [currentMove?.ply, history]);
+
   const isLive = inspectedPly === null || inspectedPly === latestPly;
 
   const currentSnapshot = useMemo(() => {
@@ -191,12 +191,40 @@ export const StudioView: React.FC<StudioViewProps> = ({
     return history.find((s) => s.ply === inspectedPly) || null;
   }, [isLive, inspectedPly, history]);
 
+  const activeFen =
+    fen && fen.trim().length > 0
+      ? fen
+      : history.length > 0
+      ? history[history.length - 1].fen
+      : DEFAULT_CHESS_START_FEN;
+
   // Synchronized active displays based on navigation
   const displayedFen = isLive ? activeFen : (currentSnapshot?.fen ?? activeFen);
   const displayedEval = isLive ? evaluation : (currentSnapshot?.evaluation ?? null);
   const displayedVisualCues = isLive ? visualCues : (currentSnapshot?.visualCues ?? null);
-  const displayedMove = isLive ? currentMove : (currentSnapshot?.move ?? null);
+  const displayedMove = isLive
+    ? (currentMove || (history.length > 1 ? history[history.length - 1].move : null))
+    : (currentSnapshot?.move ?? null);
   const displayedPly = isLive ? latestPly : (inspectedPly ?? 0);
+
+  // Derive the actual side whose turn it is to move on the board
+  const liveActiveSide = useMemo(() => {
+    if (isGameOver) return null;
+    return getSideToMoveFromFen(activeFen);
+  }, [activeFen, isGameOver]);
+
+  // 3. Live Synchronized Clocks (driven by true side-to-move)
+  const {
+    whiteClock,
+    blackClock,
+    isWhiteTimeTrouble,
+    isBlackTimeTrouble,
+  } = useChessClock({
+    initialWhiteSeconds: currentMove?.white_clock_seconds,
+    initialBlackSeconds: currentMove?.black_clock_seconds,
+    activeTurn: liveActiveSide || turn,
+    isGameOver,
+  });
 
   // Active side for the currently viewed position (live or history)
   const currentSideToMove = useMemo(() => {
@@ -225,9 +253,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const bottomColor: 'white' | 'black' = boardOrientation === 'white' ? 'white' : 'black';
 
   return (
-    <div className="h-screen max-h-screen w-full bg-[#0a0c10] text-stone-100 flex flex-col justify-between overflow-y-auto lg:overflow-hidden select-none">
+    <div
+      className={`h-screen max-h-screen w-full flex flex-col justify-between overflow-y-auto lg:overflow-hidden select-none transition-colors duration-200 ${
+        isDark ? 'bg-[#0b0c0f] text-neutral-100' : 'bg-[#f5f6f9] text-neutral-900'
+      }`}
+    >
       {/* 1. Header Bar */}
-      <header className="shrink-0 border-b border-stone-800/80 bg-[#10131a]">
+      <header
+        className={`shrink-0 border-b transition-colors duration-200 ${
+          isDark ? 'border-white/[0.08] bg-[#13151b]' : 'border-neutral-200 bg-white'
+        }`}
+      >
         <BroadcastHeader
           metadata={metadata}
           status={status}
@@ -254,8 +290,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
               isActiveTurn={isColorTurn(topColor)}
               isTimeTrouble={topColor === 'black' ? isBlackTimeTrouble : isWhiteTimeTrouble}
               lastMoveTimeSpent={
-                currentMove?.turn === topColor
-                  ? currentMove.move_time_spent_seconds
+                displayedMove?.turn === topColor
+                  ? displayedMove.move_time_spent_seconds
                   : null
               }
             />
@@ -307,8 +343,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
               isActiveTurn={isColorTurn(bottomColor)}
               isTimeTrouble={bottomColor === 'white' ? isWhiteTimeTrouble : isBlackTimeTrouble}
               lastMoveTimeSpent={
-                currentMove?.turn === bottomColor
-                  ? currentMove.move_time_spent_seconds
+                displayedMove?.turn === bottomColor
+                  ? displayedMove.move_time_spent_seconds
                   : null
               }
             />
@@ -328,7 +364,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
       </main>
 
       {/* 3. Lower-Third Ticker Bar */}
-      <footer className="shrink-0 border-t border-stone-800/80 bg-[#10131a]">
+      <footer
+        className={`shrink-0 border-t transition-colors duration-200 ${
+          isDark ? 'border-white/[0.08] bg-[#13151b]' : 'border-neutral-200 bg-white'
+        }`}
+      >
         <TickerBar
           evaluation={displayedEval}
           lastMove={displayedMove}

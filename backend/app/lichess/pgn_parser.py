@@ -32,14 +32,14 @@ class ParsedMoveEvent:
     uci: str                        # e.g., "g1f3"
     san: str                        # e.g., "Nf3"
     fen: str                        # Current board FEN
-    move_time_spent_seconds: float  # Think time on this move
-    white_clock_seconds: Optional[float]
-    black_clock_seconds: Optional[float]
-    is_check: bool
-    is_checkmate: bool
-    is_stalemate: bool
-    is_draw: bool
-    is_time_trouble: bool           # Clock fell below threshold
+    move_time_spent_seconds: float = 0.0  # Think time on this move
+    white_clock_seconds: Optional[float] = None
+    black_clock_seconds: Optional[float] = None
+    is_check: bool = False
+    is_checkmate: bool = False
+    is_stalemate: bool = False
+    is_draw: bool = False
+    is_time_trouble: bool = False   # Clock fell below threshold
     termination_reason: Optional[str] = None
     acting_player: Optional[str] = None
 
