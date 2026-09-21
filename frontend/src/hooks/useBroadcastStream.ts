@@ -64,6 +64,36 @@ export function useBroadcastStream({
 
   const eventSourceRef = useRef<EventSource | null>(null);
 
+  // References for preferences and callbacks to prevent triggering reconnects/resets mid-game
+  const ttsRef = useRef(tts);
+  const autoPlayAudioRef = useRef(autoPlayAudio);
+  const onFrameRef = useRef(onFrame);
+  const onAudioInterruptRef = useRef(onAudioInterrupt);
+  const onTerminationRef = useRef(onTermination);
+
+  useEffect(() => {
+    ttsRef.current = tts;
+    if (!tts) {
+      radioEngine.interrupt();
+    }
+  }, [tts]);
+
+  useEffect(() => {
+    autoPlayAudioRef.current = autoPlayAudio;
+  }, [autoPlayAudio]);
+
+  useEffect(() => {
+    onFrameRef.current = onFrame;
+  }, [onFrame]);
+
+  useEffect(() => {
+    onAudioInterruptRef.current = onAudioInterrupt;
+  }, [onAudioInterrupt]);
+
+  useEffect(() => {
+    onTerminationRef.current = onTermination;
+  }, [onTermination]);
+
   const resetState = useCallback(() => {
     setMetadata(null);
     setFen(STARTING_FEN);
@@ -98,7 +128,7 @@ export function useBroadcastStream({
     // Build API endpoint URL based on route types
     const params = new URLSearchParams({
       replay_all: String(replayAll),
-      tts: String(tts),
+      tts: String(ttsRef.current),
     });
 
     const endpoint = roundId
@@ -116,7 +146,7 @@ export function useBroadcastStream({
     es.onmessage = (event) => {
       try {
         const frame: BroadcastFrame = JSON.parse(event.data);
-        onFrame?.(frame);
+        onFrameRef.current?.(frame);
 
         switch (frame.event_type) {
           case 'METADATA': {
@@ -150,7 +180,7 @@ export function useBroadcastStream({
               setTranscript((prev) => [...prev, frame.commentary!]);
 
               // Queue audio turns sequentially for broadcast playback
-              if (autoPlayAudio && tts && frame.commentary.turns.length > 0) {
+              if (autoPlayAudioRef.current && ttsRef.current && frame.commentary.turns.length > 0) {
                 radioEngine.enqueueTurns(frame.commentary.turns);
               }
             }
@@ -161,7 +191,7 @@ export function useBroadcastStream({
             if (frame.commentary) {
               setLatestCommentary(frame.commentary);
               setTranscript((prev) => [...prev, frame.commentary!]);
-              if (autoPlayAudio && tts && frame.commentary.turns.length > 0) {
+              if (autoPlayAudioRef.current && ttsRef.current && frame.commentary.turns.length > 0) {
                 radioEngine.enqueueTurns(frame.commentary.turns);
               }
             }
@@ -171,7 +201,7 @@ export function useBroadcastStream({
           case 'AUDIO_INTERRUPT': {
             // Immediate priority override: dump audio buffer for blunders/brilliancies
             radioEngine.interrupt();
-            onAudioInterrupt?.();
+            onAudioInterruptRef.current?.();
             break;
           }
 
@@ -187,12 +217,12 @@ export function useBroadcastStream({
             if (frame.commentary) {
               setLatestCommentary(frame.commentary);
               setTranscript((prev) => [...prev, frame.commentary!]);
-              if (autoPlayAudio && tts && frame.commentary.turns.length > 0) {
+              if (autoPlayAudioRef.current && ttsRef.current && frame.commentary.turns.length > 0) {
                 radioEngine.enqueueTurns(frame.commentary.turns);
               }
             }
 
-            onTermination?.(reason);
+            onTerminationRef.current?.(reason);
             es.close();
             eventSourceRef.current = null;
             break;
@@ -229,11 +259,6 @@ export function useBroadcastStream({
     gameId,
     roundId,
     replayAll,
-    tts,
-    autoPlayAudio,
-    onFrame,
-    onAudioInterrupt,
-    onTermination,
     disconnect,
     resetState,
   ]);
@@ -246,7 +271,7 @@ export function useBroadcastStream({
     return () => {
       disconnect();
     };
-  }, [autoConnect, gameId, roundId, connect, disconnect]);
+  }, [autoConnect, gameId, roundId, replayAll, connect, disconnect]);
 
   return {
     // Stream status

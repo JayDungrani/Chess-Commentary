@@ -34,15 +34,17 @@ SYSTEM_PROMPT = """You are the broadcast director and dialogue generator for an 
 - ONLY the move listed under "Move Played" has actually occurred!
 - STRICT MOVE ATTRIBUTION (DO NOT CONFUSE PLAYERS):
   1. "MISSED BETTER ALTERNATIVE": This was an alternative move for the player who JUST MOVED.
-     • Example: If Black played Bg4 and missed Ba6, say: "Black should have played bishop to a6" or "Black missed the chance to drop the bishop to a6."
+     • Example: If Black played b5 and missed knight to e4, say: "Black missed knight to e4" or "Black should have played knight to e4."
      • NEVER suggest the opponent's upcoming move as an alternative for the player!
-  2. "UPCOMING CONTINUATIONS FOR OPPONENT": These are prospective replies for the opponent who is NEXT TO MOVE.
-     • Example: "White can now look to swing the rook to c2."
-     • Black CANNOT play rook to c2—that is White's rook! Never mix up the two sides.
-- Frame opponent responses conditionally as suggestions, threats, or possibilities:
-  • "White can look to push the f-pawn here..."
-  • "The natural try is castling kingside..."
-  • "If White finds knight to d5, Black is in serious trouble."
+  2. "UPCOMING CONTINUATIONS FOR OPPONENT": These are prospective candidate replies for the opponent who is NEXT TO MOVE.
+     • STRICT TEMPORAL BAN: NEVER use present-tense indicative verbs for the opponent like "[Opponent] now plays X", "[Opponent] plays X", or "[Opponent] pushes X"!
+     • The opponent HAS NOT MOVED YET! Saying "[Opponent] now plays X" is a FALSE statement of fact that confuses viewers looking at the board.
+     • MANDATORY MODAL/CONDITIONAL PHRASING: ALWAYS use modal verbs indicating possibilities, options, or threats:
+       - "White can now play pawn to a4." (STRICTLY FORBIDDEN: "White now plays a4")
+       - "White can look to strike with a4."
+       - "White has pawn to a4 here."
+       - "Watch out for White's pawn to a4."
+       - "If White finds a4, Black is in serious trouble."
 
 ### SPOKEN AUDIO & STYLE RULES:
 - NO RAW ALGEBRAIC NOTATION: NEVER output notation codes like "Qb2", "Bxc3", "Rfc8", "h3", "Ba6", or "Rc2". Always speak them in natural English words:
@@ -107,7 +109,9 @@ def _format_eval_description(eval_cp: Optional[int], mate_in: Optional[int]) -> 
 def build_pondering_prompt(context: CommentaryContext) -> str:
     turn_color = context.evaluation.turn.capitalize()
     acting_player = context.white_player if context.evaluation.turn == "white" else context.black_player
-    candidates_str = ", ".join(context.candidate_suggestions) if context.candidate_suggestions else "central pawn breaks or piece development"
+    candidates_str = ", ".join(context.candidate_suggestions) if context.candidate_suggestions else "central pawn breaks or piece coordination"
+
+    style_directive = context.ponder_style_hint or "TACTICAL_QUESTION: Pose a sharp, direct rhetorical question about candidate moves or threats."
 
     prompt_lines = [
         "### CURRENT MATCH CONTEXT (IN THE TANK / PONDERING):",
@@ -117,11 +121,14 @@ def build_pondering_prompt(context: CommentaryContext) -> str:
         f"- Board FEN: {context.evaluation.fen_after}",
         f"- Top Candidate Continuations (Stockfish): {candidates_str}",
         "",
-        "### PONDERING GUIDANCE (STRICT PHRASING RULE):",
-        f"- {acting_player} is currently paused in deep calculation on the board.",
-        f"- SPECULATE CONDITIONALLY: Frame candidate continuations as possibilities or what they MIGHT be weighing or SHOULD consider.",
-        "- REQUIRED PHRASING STYLE: 'White might be weighing...', 'Black could be considering...', 'Perhaps they should look at...', 'They could be debating between...'",
-        "- DO NOT claim you know what they ARE thinking (always use conditional framing: 'might be', 'could be', 'should consider').",
+        "### PONDERING GUIDANCE (NATURAL TV BROADCAST DESK STYLE):",
+        f"- {acting_player} is paused on the clock, calculating over the board.",
+        f"- STYLE DIRECTIVE FOR THIS PAUSE: {style_directive}",
+        "",
+        "### STRICT ANTI-REPETITION RULES (DO NOT USE ROBOTIC TEMPLATES):",
+        "- STRICT BAN: NEVER say '[Color] is deep in thought', 'weighing their options', 'could they be debating between', or 'at a critical crossroads'.",
+        "- FOCUS ON THE BOARD: Discuss the concrete board dilemma, the piece struggle, the pawn tension, or the tactical threat—NOT generic mind-reading.",
+        "- SPECULATE NATURALLY & CONDITIONALLY: Frame possibilities with authentic commentator phrasing (e.g., 'Does Black dare push...', 'Tough call here—trading minor pieces...', 'That bishop needs breathing room...', 'Stockfish loves tucking the king, but...').",
         f"- Target Word Budget: {context.target_word_range} (STRICT total combined words).",
         "",
         "### FORMAT DIRECTIVE:",
@@ -156,12 +163,19 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
     if context.was_pondered:
         prompt_lines.append(
             f"- POST-PONDERED MOVE: You already discussed candidate ideas while {turn_color} was in the tank! "
-            f"Keep this move confirmation ultra-crisp and punchy ({context.target_word_range}, e.g. 'And {turn_color} commits to {eval_data.played_san}!')."
+            f"Deliver a fresh, natural move confirmation ({context.target_word_range}). "
+            "STRICT BAN: DO NOT say 'commits to X—a bold, principled strike' or use robotic formulas! "
+            "Vary your reaction naturally: "
+            "• Direct realization: 'And there it is—c5! Straight into the fire.' "
+            "• Alternative choice: 'They bypass the trade and push e4 instead!' "
+            "• Concise confirmation: 'The knight trade happens. Equalizing.' "
+            "• Immediate momentum: 'f5 played—and the battle shifts to the kingside.'"
         )
     elif context.think_category == ThinkCategory.DEEP_THINK:
         prompt_lines.append(
             f"- DEEP THINK SPOTLIGHT: {turn_color} spent {context.move_time_spent_seconds:.1f}s calculating in {context.game_format.upper()}! "
-            "Acknowledge the long pause, highlight the hesitation or candidate lines they weighed, and provide a richer breakdown."
+            "Acknowledge the long pause, highlight the hesitation or candidate lines they weighed, and provide a richer breakdown. "
+            "STRICT BAN: DO NOT use robotic phrases like '[Color] is deep in thought', 'weighing options', or 'at a critical crossroads'. Focus concretely on the board tension."
         )
     elif context.think_category == ThinkCategory.INSTANT:
         prompt_lines.append(
@@ -240,8 +254,10 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
             prompt_lines.extend([
                 "",
                 f"### UPCOMING CONTINUATIONS FOR {opponent_color.upper()} (NEXT TO MOVE):",
-                f"- Moves {opponent_color} can look for now: {', '.join(top_candidates)}",
-                f"- MANDATORY RULE: These moves belong to {opponent_color}. Never say {turn_color} should have played them!",
+                f"- Candidate moves {opponent_color} can look for next: {', '.join(top_candidates)}",
+                f"- STRICT TEMPORAL BAN: {opponent_color} has NOT moved yet! NEVER say '{opponent_color} now plays [move]' or '{opponent_color} plays [move]'!",
+                f"- MANDATORY RULE: ALWAYS use modal verbs indicating possibilities or options (e.g. '{opponent_color} can now play pawn to a4', '{opponent_color} can look to...', '{opponent_color} has...').",
+                f"- NEVER attribute {opponent_color}'s candidate moves to {turn_color}!",
             ])
 
     if context.dialogue_history:
@@ -259,13 +275,13 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
     elif context.dynamic == SpeakingDynamic.SOLO_ANALYST:
         prompt_lines.extend([
             "- FORMAT: SOLO_ANALYST (Exactly ONE turn from ANALYST).",
-            f"- Deliver an engaging Grandmaster breakdown. If {turn_color} erred, validate the human temptation first, then state that they missed {missed_alt_san or 'the best continuation'}.",
+            f"- Deliver an engaging Grandmaster breakdown. If {turn_color} erred, validate the human temptation first, then state that they missed {missed_alt_san or 'the best continuation'}. For {opponent_color}, use modal phrasing ('{opponent_color} can now look to...').",
         ])
     elif context.dynamic == SpeakingDynamic.BANTER:
         prompt_lines.extend([
             "- FORMAT: BANTER (HOST followed immediately by ANALYST).",
             "- Host: React to the move, question the plan, or frame the tension and clock.",
-            f"- Analyst: Explain the tactical reality with Grandmaster clarity. If {turn_color} made an inaccuracy, validate their instinct first, point out that {turn_color} missed {missed_alt_san or 'a stronger line'}, and note what {opponent_color} can now try.",
+            f"- Analyst: Explain the tactical reality with Grandmaster clarity. If {turn_color} made an inaccuracy, validate their instinct first, point out that {turn_color} missed {missed_alt_san or 'a stronger line'}, and note what {opponent_color} CAN now look to play (use modal verbs: '{opponent_color} can now play...', NEVER '{opponent_color} now plays...').",
         ])
     elif context.dynamic == SpeakingDynamic.PLAY_BY_PLAY:
         prompt_lines.extend([

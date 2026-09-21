@@ -48,6 +48,7 @@ class BroadcastDirector:
         self.consecutive_book_moves: int = 0
         self.consecutive_fast_moves: int = 0
         self.game_format: str = game_format.lower()
+        self.ponder_style_index: int = 0
 
     def reset(self, game_format: str = "blitz") -> None:
         """Resets commentator memory and tracking state for a new game."""
@@ -57,6 +58,7 @@ class BroadcastDirector:
         self.consecutive_book_moves = 0
         self.consecutive_fast_moves = 0
         self.game_format = game_format.lower()
+        self.ponder_style_index = 0
 
     def is_format_time_trouble(self, clock_seconds: Optional[float]) -> bool:
         if clock_seconds is None:
@@ -277,6 +279,16 @@ class BroadcastDirector:
             else SpeakingDynamic.SOLO_HOST
         )
 
+        ponder_styles = [
+            "TACTICAL_QUESTION: Pose a sharp, direct rhetorical question about candidate moves or threats (e.g., 'Can White get away with c5 right now, or is e4 too fast?')",
+            "STRATEGIC_TRADEOFF: Highlight positional trade-offs (e.g., 'Tough call—trading minor pieces relieves the squeeze, but concedes the d4 outpost.')",
+            "PIECE_ACTIVITY: Spotlight a key piece's struggle or mobility (e.g., 'That bishop on e2 needs breathing room—a central pawn break feels mandatory.')",
+            "INSTINCT_VS_ENGINE: Contrast natural human over-the-board desire with cold engine truth (e.g., 'Human instinct screams to counterpunch, though computers favor quiet defense.')",
+            "TENSION_ATMOSPHERE: Capture the atmospheric tension and ticking clock (e.g., 'Heavy silence over the board—this next pawn move dictates the entire flow of the endgame.')",
+        ]
+        style_hint = ponder_styles[self.ponder_style_index % len(ponder_styles)]
+        self.ponder_style_index += 1
+
         return CommentaryContext(
             evaluation=dummy_eval,
             white_player=white_player,
@@ -294,6 +306,7 @@ class BroadcastDirector:
             is_pondering=True,
             was_pondered=False,
             candidate_suggestions=candidate_suggestions,
+            ponder_style_hint=style_hint,
             dialogue_history=list(self.dialogue_history),
         )
 

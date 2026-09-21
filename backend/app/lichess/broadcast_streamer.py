@@ -38,10 +38,12 @@ class BroadcastGameSummary(BaseModel):
     white_title: Optional[str] = None
     white_elo: Optional[int] = None
     white_team: Optional[str] = None
+    white_fed: Optional[str] = None
     black_name: str
     black_title: Optional[str] = None
     black_elo: Optional[int] = None
     black_team: Optional[str] = None
+    black_fed: Optional[str] = None
     result: str = "*"
     status: str = "live"
     ply_count: int = 0
@@ -49,6 +51,128 @@ class BroadcastGameSummary(BaseModel):
     url: Optional[str] = None
     event_name: Optional[str] = None
     round_name: Optional[str] = None
+
+
+FIDE_ID_FED_RANGES = [
+    (100000, 199999, "ARG"),
+    (200000, 299999, "BEL"),
+    (300000, 399999, "CZE"),
+    (400000, 499999, "ENG"),
+    (500000, 599999, "FIN"),
+    (600000, 699999, "FRA"),
+    (700000, 799999, "HUN"),
+    (800000, 899999, "ITA"),
+    (900000, 999999, "SRB"),
+    (1000000, 1099999, "NED"),
+    (1100000, 1199999, "POL"),
+    (1200000, 1299999, "ROU"),
+    (1300000, 1399999, "SUI"),
+    (1400000, 1499999, "DEN"),
+    (1500000, 1599999, "NOR"),
+    (1600000, 1699999, "AUT"),
+    (1700000, 1799999, "SWE"),
+    (1800000, 1899999, "POR"),
+    (1900000, 1999999, "POR"),
+    (2000000, 2099999, "USA"),
+    (2100000, 2199999, "BRA"),
+    (2200000, 2299999, "ESP"),
+    (2300000, 2399999, "COL"),
+    (2400000, 2499999, "SCO"),
+    (2500000, 2599999, "IND"),
+    (2600000, 2699999, "CAN"),
+    (2800000, 2899999, "ISR"),
+    (2900000, 2999999, "TUR"),
+    (3200000, 3299999, "AUS"),
+    (3400000, 3499999, "CHI"),
+    (3500000, 3599999, "CUB"),
+    (3800000, 3899999, "PER"),
+    (4100000, 4199999, "RUS"),
+    (4200000, 4299999, "GRE"),
+    (4400000, 4499999, "BUL"),
+    (4500000, 4599999, "EST"),
+    (4600000, 4699999, "GER"),
+    (4900000, 4999999, "ISL"),
+    (5000000, 5099999, "IND"),
+    (5200000, 5299999, "PHI"),
+    (5800000, 5899999, "SGP"),
+    (7100000, 7199999, "INA"),
+    (8600000, 8699999, "CHN"),
+    (9300000, 9399999, "IRL"),
+    (10600000, 10699999, "EGY"),
+    (11600000, 11699999, "LAT"),
+    (12400000, 12499999, "VIE"),
+    (12500000, 12599999, "IRI"),
+    (13300000, 13399999, "ARM"),
+    (13400000, 13499999, "AZE"),
+    (13600000, 13699999, "GEO"),
+    (13700000, 13799999, "KAZ"),
+    (13900000, 13999999, "LTU"),
+    (14100000, 14199999, "UKR"),
+    (14200000, 14299999, "UZB"),
+    (14300000, 14399999, "RSA"),
+    (14400000, 14499999, "MDA"),
+    (14500000, 14599999, "CRO"),
+    (14600000, 14699999, "SLO"),
+    (14700000, 14799999, "BIH"),
+    (14900000, 14999999, "SVK"),
+    (15000000, 15099999, "BLR"),
+    (24100000, 24199999, "RUS"),
+    (25000000, 25999999, "IND"),
+    (30000000, 30999999, "USA"),
+    (33000000, 33999999, "IND"),
+    (34000000, 34999999, "USA"),
+    (35000000, 35999999, "IND"),
+]
+
+
+def fide_id_to_fed(fide_id_str: Optional[str]) -> Optional[str]:
+    """Resolves national federation from FIDE ID assignment blocks."""
+    if not fide_id_str:
+        return None
+    try:
+        digits = re.sub(r"\D", "", str(fide_id_str))
+        if not digits:
+            return None
+        val = int(digits)
+        for low, high, fed in FIDE_ID_FED_RANGES:
+            if low <= val <= high:
+                return fed
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def extract_player_fed_and_name(headers: chess.pgn.Headers, color: str) -> Tuple[str, Optional[str]]:
+    """
+    Extracts cleanest player name and federation using PGN headers,
+    bracketed country tags in names, and FIDE ID blocks.
+    """
+    col_cap = color.capitalize()
+    raw_name = headers.get(col_cap, "Unknown")
+    fed = (
+        headers.get(f"{col_cap}Fed")
+        or headers.get(f"{col_cap}Country")
+        or headers.get(f"{col_cap}Team")
+    )
+
+    # Check for (AUT), [USA], or /GER/ in player name
+    match = re.search(r"[\(\[\/]([A-Za-z]{2,3})[\)\]\/]", raw_name)
+    if match:
+        extracted = match.group(1).upper()
+        if not fed:
+            fed = extracted
+        raw_name = re.sub(r"\s*[\(\[\/][A-Za-z]{2,3}[\)\]\/]", "", raw_name).strip()
+
+    # Fallback to FIDE ID prefix block lookup
+    if not fed:
+        fide_id = (
+            headers.get(f"{col_cap}FideId")
+            or headers.get(f"{col_cap}FIDEId")
+            or headers.get(f"{col_cap}FideID")
+        )
+        fed = fide_id_to_fed(fide_id)
+
+    return raw_name, fed
 
 
 def extract_broadcast_ids(url_or_id: str) -> Tuple[str, Optional[str]]:
@@ -217,18 +341,23 @@ class LichessBroadcastStreamer:
             w_elo = int(headers["WhiteElo"]) if headers.get("WhiteElo", "").isdigit() else None
             b_elo = int(headers["BlackElo"]) if headers.get("BlackElo", "").isdigit() else None
 
+            w_name, w_fed = extract_player_fed_and_name(headers, "white")
+            b_name, b_fed = extract_player_fed_and_name(headers, "black")
+
             games_list.append(
                 BroadcastGameSummary(
                     game_id=gid,
                     board=board_num,
-                    white_name=headers.get("White", "Unknown"),
+                    white_name=w_name,
                     white_title=headers.get("WhiteTitle"),
                     white_elo=w_elo,
                     white_team=headers.get("WhiteTeam"),
-                    black_name=headers.get("Black", "Unknown"),
+                    white_fed=w_fed,
+                    black_name=b_name,
                     black_title=headers.get("BlackTitle"),
                     black_elo=b_elo,
                     black_team=headers.get("BlackTeam"),
+                    black_fed=b_fed,
                     result=result,
                     status=status,
                     ply_count=ply,

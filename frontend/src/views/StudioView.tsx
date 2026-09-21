@@ -204,7 +204,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
     return getSideToMoveFromFen(displayedFen);
   }, [isLive, isGameOver, displayedFen]);
 
-  const handleToggleTts = () => setEnableTts((prev) => !prev);
+  const handleToggleTts = () => {
+    setEnableTts((prev) => {
+      const next = !prev;
+      if (!next) {
+        stopAudio();
+      }
+      return next;
+    });
+  };
   const handleExitStudio = () => {
     stopAudio();
     onExit();

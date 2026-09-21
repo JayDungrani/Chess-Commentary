@@ -31,9 +31,10 @@ class RadioAudioEngine {
         this.queue.push(turn);
       }
     }
-    // If audio is already playing and new turns arrive, speed up to catch up
-    if (this.currentAudio && this.queue.length > 0) {
-      this.currentAudio.playbackRate = 1.2;
+    // Normal dialogue between Host and Analyst (1-2 turns) is played at natural 1.0x speed.
+    // Only apply a gentle 1.1x catch-up ramp if a true multi-move backlog accumulates (3+ turns waiting).
+    if (this.currentAudio && this.queue.length >= 3) {
+      this.currentAudio.playbackRate = 1.1;
     }
     if (!this.isPlaying) {
       this.playNext();
@@ -72,8 +73,8 @@ class RadioAudioEngine {
       const audio = new Audio(audioUrl);
       this.currentAudio = audio;
       audio.muted = this.isMuted;
-      // Smart catch-up speed ramp: 1.2x if backlog in queue, 1.0x if caught up
-      audio.playbackRate = this.queue.length > 0 ? 1.2 : 1.0;
+      // Natural 1.0x playback pace. Only ramp to 1.1x if 3 or more turns are queued in backlog
+      audio.playbackRate = this.queue.length >= 3 ? 1.1 : 1.0;
 
       if (this.onSpeakerChange) {
         this.onSpeakerChange(turn.speaker, turn);

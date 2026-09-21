@@ -108,14 +108,24 @@ class TTSService:
             return self.host_voice_id
         return self.analyst_voice_id
 
-    def _get_voice_settings(self, emotion: CommentaryEmotion) -> Dict[str, float]:
-        """Calculates ElevenLabs voice settings according to emotional posture."""
+    def _get_voice_settings(
+        self,
+        emotion: CommentaryEmotion,
+        speaker: Optional[CommentatorRole] = None,
+    ) -> Dict[str, float]:
+        """Calculates ElevenLabs voice settings according to emotional posture and speaker role."""
         stability, similarity_boost, style, base_speed = EMOTION_VOICE_SETTINGS.get(
             emotion, (0.50, 0.75, 0.25, 1.15)
         )
         
+        # Host (Antoni) has a naturally brisk and energetic cadence.
+        # Calibrate Host speed with a 0.88 factor so their pace sounds natural, articulate,
+        # and perfectly matches Analyst Peter's cadence (which is praised as perfect).
+        speed_factor = 0.88 if speaker == CommentatorRole.HOST else 1.0
+        calculated_speed = base_speed * GLOBAL_SPEED_MULTIPLIER * speed_factor
+
         # Strictly clamp between ElevenLabs API limits: 0.70 and 1.20
-        adjusted_speed = min(max(round(base_speed * GLOBAL_SPEED_MULTIPLIER, 2), 0.70), 1.20)
+        adjusted_speed = min(max(round(calculated_speed, 2), 0.70), 1.20)
 
         return {
             "stability": stability,
@@ -176,7 +186,7 @@ class TTSService:
 
         current_epoch = self._interrupt_epoch
         voice_id = self._get_voice_id(turn.speaker)
-        voice_settings = self._get_voice_settings(turn.emotion)
+        voice_settings = self._get_voice_settings(turn.emotion, speaker=turn.speaker)
 
         # Output filename: {game_id}_ply{ply}_{turn_index}_{speaker}.mp3
         clean_speaker = turn.speaker.value.lower()

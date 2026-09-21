@@ -1,5 +1,5 @@
 export interface ParsedSessionTarget {
-  gameId: string;
+  gameId?: string;
   roundId?: string;
   isBroadcast: boolean;
 }
@@ -16,7 +16,7 @@ export function parseLichessTarget(input: string): ParsedSessionTarget | null {
       // In Lichess URL schemas, roundId precedes gameId
       return { roundId: hex8Tokens[0], gameId: hex8Tokens[1], isBroadcast: true };
     } else if (hex8Tokens.length === 1) {
-      return { roundId: hex8Tokens[0], gameId: hex8Tokens[0], isBroadcast: true };
+      return { roundId: hex8Tokens[0], isBroadcast: true };
     }
   }
 

@@ -60,7 +60,23 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
               {username}
             </span>
           </div>
-
+          {(rating != null || (lastMoveTimeSpent != null && lastMoveTimeSpent > 0)) && (
+            <div className="flex items-center gap-1.5 mt-0.5">
+              {rating != null && (
+                <span className="text-[11px] font-mono text-stone-400 font-medium">
+                  {rating}
+                </span>
+              )}
+              {rating != null && lastMoveTimeSpent != null && lastMoveTimeSpent > 0 && (
+                <span className="text-stone-600 text-[10px]">•</span>
+              )}
+              {lastMoveTimeSpent != null && lastMoveTimeSpent > 0 && (
+                <span className="text-[10px] font-mono text-stone-500">
+                  took {lastMoveTimeSpent.toFixed(1)}s
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

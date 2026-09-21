@@ -48,13 +48,11 @@ export const ChessStudioBoard: React.FC<ChessStudioBoardProps> = ({
       if (!containerRef.current) return;
       const { clientWidth, clientHeight } = containerRef.current;
       
-      // Preserve 1:1 aspect ratio based on available container bounds
-      const dimension = clientHeight > 0 ? Math.min(clientWidth, clientHeight) : clientWidth;
-      if (dimension > 50) {
-        const rounded = Math.floor(dimension);
-        setMeasuredWidth(rounded);
-        onHeightChange?.(rounded);
-      }
+      // Preserve 1:1 aspect ratio based on available container bounds minus 16px padding (p-2 = 8px each side)
+      const rawDimension = clientHeight > 0 ? Math.min(clientWidth, clientHeight) : clientWidth;
+      const dimension = Math.max(50, Math.floor(rawDimension - 16));
+      setMeasuredWidth(dimension);
+      onHeightChange?.(dimension);
     };
 
     updateSize();

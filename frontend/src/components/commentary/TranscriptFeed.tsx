@@ -9,6 +9,14 @@ interface TranscriptFeedProps {
   transcript: CommentaryExchange[];
 }
 
+const DYNAMIC_LABEL_MAP: Record<string, string> = {
+  SOLO_HOST: 'Solo Host',
+  SOLO_ANALYST: 'Solo Analyst',
+  BANTER: 'Studio Banter',
+  SILENCE: 'Pondering',
+  PLAY_BY_PLAY: 'Play-by-Play',
+};
+
 export const TranscriptFeed: React.FC<TranscriptFeedProps> = ({ transcript }) => {
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
 
@@ -59,8 +67,8 @@ export const TranscriptFeed: React.FC<TranscriptFeedProps> = ({ transcript }) =>
                       {movePrefix} {exchange.move_san}
                     </span>
                     <span className="text-stone-600">•</span>
-                    <span className="text-[10px] uppercase tracking-wide text-stone-500">
-                      {exchange.dynamic.replace('_', ' ')}
+                    <span className="text-[10px] uppercase tracking-wide text-stone-500 font-medium">
+                      {DYNAMIC_LABEL_MAP[exchange.dynamic] || exchange.dynamic.replace(/_/g, ' ')}
                     </span>
                   </div>
                 )}

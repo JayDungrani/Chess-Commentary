@@ -119,7 +119,7 @@ export interface CommentaryExchange {
   ply: number;
   move_san: string;
   turn_color: 'white' | 'black';
-  dynamic: 'SOLO_HOST' | 'SOLO_ANALYST' | 'BANTER' | 'SILENCE';
+  dynamic: 'SOLO_HOST' | 'SOLO_ANALYST' | 'BANTER' | 'SILENCE' | 'PLAY_BY_PLAY';
   priority: number;
   turns: DialogueTurn[];
   is_interrupt: boolean;
@@ -151,12 +151,29 @@ export interface BroadcastPlayerSummary {
 }
 
 export interface BroadcastGameSummary {
-  id: string; // Game ID to launch studio
+  id?: string;
+  game_id?: string; // Game ID to launch studio
   board?: number;
-  white: BroadcastPlayerSummary;
-  black: BroadcastPlayerSummary;
+  white?: BroadcastPlayerSummary;
+  black?: BroadcastPlayerSummary;
+  white_name?: string;
+  white_title?: string | null;
+  white_elo?: number | null;
+  white_team?: string | null;
+  white_fed?: string | null;
+  black_name?: string;
+  black_title?: string | null;
+  black_elo?: number | null;
+  black_team?: string | null;
+  black_fed?: string | null;
+  result?: string;
+  status?: string;
+  ply_count?: number;
   fen?: string;
-  status?: string; // 'started' | 'mate' | 'draw' | 'resign' | 'outoftime' | etc.
+  current_fen?: string;
+  url?: string | null;
+  event_name?: string | null;
+  round_name?: string | null;
   winner?: 'white' | 'black' | null;
   lastMove?: string;
   round?: number | string;

@@ -438,6 +438,110 @@ def test_play_by_play_dynamic():
     print(f"[PASS] Agent fallback produced spoken call: \"{fallback[0].text}\"")
 
 
+def test_pondering_cooldown_and_guards():
+    import asyncio
+    from unittest.mock import patch, AsyncMock
+    from app.lichess.pgn_parser import PonderingEvent
+
+    print("\n--- 12. Testing Pondering Cooldown & Opening/Time Guards ---")
+    class ConsecutiveMockStreamer:
+        async def stream_game_events(self):
+            # Move 1: Ply 12 (White) - 20s think -> SHOULD ponder
+            yield ParsedMoveEvent(
+                ply=12,
+                turn="white",
+                uci="e2e4",
+                san="e4",
+                fen="rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+                move_time_spent_seconds=20.0,
+                white_clock_seconds=500.0,
+                black_clock_seconds=500.0,
+                is_check=False,
+                is_checkmate=False,
+                is_stalemate=False,
+                is_draw=False,
+                is_time_trouble=False,
+                acting_player="White",
+            )
+            # Move 2: Ply 13 (Black) - 20s think -> COOLDOWN ACTIVE (ply 13 - 12 = 1 < 4), should NOT ponder
+            yield ParsedMoveEvent(
+                ply=13,
+                turn="black",
+                uci="e7e5",
+                san="e5",
+                fen="rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+                move_time_spent_seconds=20.0,
+                white_clock_seconds=500.0,
+                black_clock_seconds=500.0,
+                is_check=False,
+                is_checkmate=False,
+                is_stalemate=False,
+                is_draw=False,
+                is_time_trouble=False,
+                acting_player="Black",
+            )
+            # Move 3: Ply 16 (White) - 20s think -> COOLDOWN PASSED (ply 16 - 12 = 4 >= 4), SHOULD ponder
+            yield ParsedMoveEvent(
+                ply=16,
+                turn="white",
+                uci="g1f3",
+                san="Nf3",
+                fen="rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+                move_time_spent_seconds=20.0,
+                white_clock_seconds=500.0,
+                black_clock_seconds=500.0,
+                is_check=False,
+                is_checkmate=False,
+                is_stalemate=False,
+                is_draw=False,
+                is_time_trouble=False,
+                acting_player="White",
+            )
+
+    async def run_test():
+        streamer = PacedMoveStreamer(
+            streamer=ConsecutiveMockStreamer(),
+            fast_forward_initial_history=False,
+            game_format="rapid",
+            enable_pondering=True,
+            cooldown_plies=4,
+            min_ponder_ply=8,
+        )
+        emitted = []
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            async for ev in streamer.stream_paced_events():
+                emitted.append(ev)
+        return emitted
+
+    emitted = asyncio.run(run_test())
+    ponder_events = [ev for ev in emitted if isinstance(ev, PonderingEvent)]
+    move_events = [ev for ev in emitted if isinstance(ev, ParsedMoveEvent)]
+    assert len(move_events) == 3
+    assert len(ponder_events) == 2, f"Expected exactly 2 ponder events, got {len(ponder_events)}"
+    print("[PASS] Pondering cooldown successfully prevented consecutive back-to-back pondering events!")
+
+
+def test_temporal_phrasing_sanitizer():
+    print("\n--- 13. Testing Prospective Temporal Phrasing Sanitizer ---")
+    raw_text_1 = "Greedy. Missed knight to e4; White now plays a4."
+    cleaned_1 = CommentaryAgent._sanitize_temporal_phrasing(raw_text_1, opponent_color="White")
+    assert cleaned_1 == "Greedy. Missed knight to e4; White can now play a4."
+
+    raw_text_2 = "Greedy. Missed knight to e4. White plays a4."
+    cleaned_2 = CommentaryAgent._sanitize_temporal_phrasing(raw_text_2, opponent_color="White")
+    assert cleaned_2 == "Greedy. Missed knight to e4. White can play a4."
+
+    raw_text_3 = "White now strikes with bishop to c4."
+    cleaned_3 = CommentaryAgent._sanitize_temporal_phrasing(raw_text_3, opponent_color="White")
+    assert cleaned_3 == "White can now strike with bishop to c4."
+
+    # Active player who actually moved should NOT be rewritten
+    active_player_text = "Black plays bishop to g7."
+    kept_active = CommentaryAgent._sanitize_temporal_phrasing(active_player_text, opponent_color="White")
+    assert kept_active == "Black plays bishop to g7."
+    print("[PASS] Temporal phrasing correctly converts false present tense for upcoming opponent to modal 'can play'!")
+
+
 if __name__ == "__main__":
     test_pacing_buffer_formats()
     test_director_think_classification()
@@ -450,4 +554,6 @@ if __name__ == "__main__":
     test_agent_pondering_fallback()
     test_san_to_spoken_move()
     test_play_by_play_dynamic()
+    test_pondering_cooldown_and_guards()
+    test_temporal_phrasing_sanitizer()
     print("\nALL VERIFICATION TESTS PASSED SUCCESSFULLY!")

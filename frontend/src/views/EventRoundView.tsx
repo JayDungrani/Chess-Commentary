@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Chessboard } from 'react-chessboard';
 import type { BroadcastGameSummary } from '../types/broadcast';
+import { CountryFlag } from '../components/common/CountryFlag';
 
 interface EventRoundViewProps {
   roundId: string;
@@ -65,8 +66,8 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
     const query = searchQuery.toLowerCase();
     return games.filter((g, index) => {
       const boardNum = (g.board ?? index + 1).toString();
-      const whiteName = (g.white?.name || g.white?.username || '').toLowerCase();
-      const blackName = (g.black?.name || g.black?.username || '').toLowerCase();
+      const whiteName = (g.white_name || g.white?.name || g.white?.username || '').toLowerCase();
+      const blackName = (g.black_name || g.black?.name || g.black?.username || '').toLowerCase();
       return (
         boardNum.includes(query) ||
         whiteName.includes(query) ||
@@ -161,15 +162,26 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {filteredGames.map((game, idx) => {
+                const gameId = game.game_id || game.id || (game.board ? String(game.board) : '');
                 const boardNum = game.board ?? idx + 1;
-                const whiteName = game.white?.name || game.white?.username || 'White';
-                const blackName = game.black?.name || game.black?.username || 'Black';
-                const isOngoing = !game.status || game.status === 'started';
+                const whiteName = game.white_name || game.white?.name || game.white?.username || 'White';
+                const whiteTitle = game.white_title || game.white?.title;
+                const whiteRating = game.white_elo || game.white?.rating;
+                const whiteFed = game.white_fed || game.white_team || game.white?.federation;
+
+                const blackName = game.black_name || game.black?.name || game.black?.username || 'Black';
+                const blackTitle = game.black_title || game.black?.title;
+                const blackRating = game.black_elo || game.black?.rating;
+                const blackFed = game.black_fed || game.black_team || game.black?.federation;
+
+                const isOngoing = !game.status || game.status === 'started' || game.status === 'live' || game.result === '*';
+                const fen = game.current_fen || game.fen || 'start';
+                const cardKey = game.game_id || game.id || `board-card-${boardNum}-${idx}`;
 
                 return (
                   <div
-                    key={game.id}
-                    onClick={() => onSelectGame(game.id)}
+                    key={cardKey}
+                    onClick={() => onSelectGame(gameId)}
                     className="group relative bg-[#12151d] hover:bg-[#161a24] border border-stone-800 hover:border-amber-500/50 rounded-2xl p-4 transition-all duration-200 shadow-lg cursor-pointer flex flex-col justify-between"
                   >
                     {/* Top: Board number & Game Status */}
@@ -184,9 +196,9 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
                           LIVE
                         </span>
                       ) : (
-                        <span className="flex items-center gap-1 text-[11px] font-mono text-stone-400">
+                        <span className="flex items-center gap-1 text-[11px] font-mono text-stone-400 font-semibold">
                           <CheckCircle2 className="w-3.5 h-3.5 text-stone-500" />
-                          {game.status}
+                          {game.result && game.result !== '*' ? game.result : (game.status || 'Finished')}
                         </span>
                       )}
                     </div>
@@ -196,7 +208,7 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
                       {/* Mini Board thumbnail */}
                       <div className="w-24 h-24 shrink-0 rounded-lg overflow-hidden border border-stone-800/80 pointer-events-none">
                         <Chessboard
-                          position={game.fen || 'start'}
+                          position={fen}
                           boardWidth={96}
                           arePiecesDraggable={false}
                           customDarkSquareStyle={{ backgroundColor: '#7a6652' }}
@@ -210,18 +222,19 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
                         <div className="flex items-center justify-between text-xs">
                           <div className="flex items-center gap-1.5 truncate">
                             <span className="w-2.5 h-2.5 rounded-sm bg-stone-200 border border-stone-400 shrink-0" />
-                            {game.white?.title && (
+                            <CountryFlag countryCode={whiteFed} playerName={whiteName} />
+                            {whiteTitle && (
                               <span className="bg-amber-500/15 text-amber-300 text-[9px] font-bold px-1 rounded border border-amber-500/30">
-                                {game.white.title}
+                                {whiteTitle}
                               </span>
                             )}
                             <span className="font-semibold text-stone-200 truncate">
                               {whiteName}
                             </span>
                           </div>
-                          {game.white?.rating && (
+                          {whiteRating && (
                             <span className="text-[11px] font-mono text-stone-400 shrink-0 ml-1">
-                              {game.white.rating}
+                              {whiteRating}
                             </span>
                           )}
                         </div>
@@ -230,18 +243,19 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
                         <div className="flex items-center justify-between text-xs">
                           <div className="flex items-center gap-1.5 truncate">
                             <span className="w-2.5 h-2.5 rounded-sm bg-stone-800 border border-stone-600 shrink-0" />
-                            {game.black?.title && (
+                            <CountryFlag countryCode={blackFed} playerName={blackName} />
+                            {blackTitle && (
                               <span className="bg-amber-500/15 text-amber-300 text-[9px] font-bold px-1 rounded border border-amber-500/30">
-                                {game.black.title}
+                                {blackTitle}
                               </span>
                             )}
                             <span className="font-semibold text-stone-200 truncate">
                               {blackName}
                             </span>
                           </div>
-                          {game.black?.rating && (
+                          {blackRating && (
                             <span className="text-[11px] font-mono text-stone-400 shrink-0 ml-1">
-                              {game.black.rating}
+                              {blackRating}
                             </span>
                           )}
                         </div>
@@ -251,7 +265,7 @@ export const EventRoundView: React.FC<EventRoundViewProps> = ({
                     {/* Bottom: Action CTA */}
                     <div className="mt-3 pt-2.5 border-t border-stone-800/80 flex items-center justify-between">
                       <span className="text-[11px] font-mono text-stone-500">
-                        {game.lastMove ? `Last: ${game.lastMove}` : 'Ready'}
+                        {game.lastMove ? `Last: ${game.lastMove}` : (game.ply_count ? `Move ${Math.floor((game.ply_count + 1) / 2)}` : 'Ready')}
                       </span>
                       <div className="flex items-center gap-1 text-xs font-bold text-amber-400 group-hover:text-amber-300 transition-colors">
                         <Radio className="w-3.5 h-3.5" />

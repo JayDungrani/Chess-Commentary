@@ -715,18 +715,19 @@ class BroadcastSession:
         is_live_event = bool(self.round_id and not self.replay_all)
         max_delay = 0.0 if is_live_event else settings.max_paced_move_delay_seconds
 
-        self.paced_streamer = PacedMoveStreamer(
-            streamer=raw_streamer,
-            fast_forward_initial_history=not self.replay_all,
-            max_paced_move_delay_seconds=max_delay,
-            target_live_ply=target_start_ply,
-        )
-
         white_name = "White"
         black_name = "Black"
         game_speed = "classical" if self.round_id else "blitz"
         game_concluded = False
         self._last_move_pondered = False
+
+        self.paced_streamer = PacedMoveStreamer(
+            streamer=raw_streamer,
+            fast_forward_initial_history=not self.replay_all,
+            max_paced_move_delay_seconds=max_delay,
+            target_live_ply=target_start_ply,
+            game_format=game_speed,
+        )
 
         try:
             async for event in self.paced_streamer.stream_paced_events():

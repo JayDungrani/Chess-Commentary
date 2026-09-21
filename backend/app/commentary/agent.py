@@ -221,8 +221,10 @@ class CommentaryAgent:
             logger.error(f"Gemini commentary generation failed ({exc}); falling back to template.")
             parsed_turns = self._generate_fallback_turns(context, priority)
 
-        # 5. Populate Speech Metadata (~2.5 words per second)
+        # 5. Populate Speech Metadata (~2.5 words per second) & Enforce Temporal Phrasing
+        opponent_color = "Black" if eval_data.turn == "white" else "White"
         for turn in parsed_turns:
+            turn.text = self._sanitize_temporal_phrasing(turn.text, opponent_color)
             word_count = len(turn.text.split())
             turn.estimated_duration_seconds = max(1.0, round(word_count / 2.5, 2))
 
@@ -235,6 +237,21 @@ class CommentaryAgent:
             turns=parsed_turns,
             is_interrupt=is_interrupt,
         )
+
+    @staticmethod
+    def _sanitize_temporal_phrasing(text: str, opponent_color: str) -> str:
+        """
+        Guarantees that prospective moves for the opponent (who has not moved yet)
+        use modal/conditional phrasing (e.g. 'can now play') instead of false present tense.
+        """
+        opp = opponent_color.capitalize()
+        # 'White now plays' -> 'White can now play'
+        text = re.sub(rf"\b{opp}\s+now\s+plays\b", f"{opp} can now play", text, flags=re.IGNORECASE)
+        text = re.sub(rf"\b{opp}\s+now\s+pushes\b", f"{opp} can now push", text, flags=re.IGNORECASE)
+        text = re.sub(rf"\b{opp}\s+now\s+strikes\b", f"{opp} can now strike", text, flags=re.IGNORECASE)
+        # 'White plays [move]' when preceded by punctuation/semicolon
+        text = re.sub(rf"([.;,]\s*){opp}\s+plays\b", rf"\1{opp} can play", text, flags=re.IGNORECASE)
+        return text
 
     def _parse_llm_json(self, raw_json: str, priority: int) -> List[DialogueTurn]:
         """Sanitizes and parses JSON string safely."""

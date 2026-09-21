@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 PONDER_THRESHOLDS = {
     "bullet": 999.0,
     "ultra_bullet": 999.0,
-    "blitz": 8.0,
-    "rapid": 12.0,
-    "classical": 20.0,
+    "blitz": 15.0,
+    "rapid": 18.0,
+    "classical": 45.0,
 }
 
 
@@ -41,6 +41,8 @@ class PacedMoveStreamer:
         target_live_ply: Optional[int] = None,
         game_format: Optional[str] = None,
         enable_pondering: bool = True,
+        cooldown_plies: int = 4,
+        min_ponder_ply: int = 8,
     ):
         self.streamer = streamer
         self.fast_forward_initial = fast_forward_initial_history
@@ -48,6 +50,9 @@ class PacedMoveStreamer:
         self.target_live_ply = target_live_ply
         self.game_format = game_format
         self.enable_pondering = enable_pondering
+        self.cooldown_plies = cooldown_plies
+        self.min_ponder_ply = min_ponder_ply
+        self.last_pondered_ply: Optional[int] = None
         self._last_fen = chess.STARTING_FEN
 
         if game_format:
@@ -161,15 +166,41 @@ class PacedMoveStreamer:
                     move_start_wall_time = last_emit_wall_time
                     elapsed_wall_time = time.monotonic() - move_start_wall_time
                     remaining_delay = target_delay - elapsed_wall_time
+                    ponder_threshold = PONDER_THRESHOLDS.get(self.game_format or "rapid", 18.0)
 
-                    ponder_threshold = PONDER_THRESHOLDS.get(self.game_format or "rapid", 12.0)
+                    # Cooldown guard: require at least cooldown_plies between consecutive pondering moments
+                    ply_cooldown_ok = (
+                        self.last_pondered_ply is None
+                        or (event.ply - self.last_pondered_ply) >= self.cooldown_plies
+                    )
+
+                    # Opening guard: don't speculate in the tank during standard opening development
+                    opening_ok = event.ply >= self.min_ponder_ply
+
+                    # Time trouble guard: scrambling players low on clock are not deep in strategic planning
+                    active_clock = event.white_clock_seconds if event.turn == "white" else event.black_clock_seconds
+                    is_in_time_trouble = False
+                    if active_clock is not None:
+                        if self.game_format in ("bullet", "ultra_bullet"):
+                            is_in_time_trouble = active_clock <= 10.0
+                        elif self.game_format == "blitz":
+                            is_in_time_trouble = active_clock <= 15.0
+                        elif self.game_format == "rapid":
+                            is_in_time_trouble = active_clock <= 25.0
+                        else:
+                            is_in_time_trouble = active_clock <= 45.0
+
                     should_ponder = (
                         self.enable_pondering
                         and target_delay >= ponder_threshold
                         and remaining_delay > 4.0
+                        and ply_cooldown_ok
+                        and opening_ok
+                        and not is_in_time_trouble
                     )
 
                     if should_ponder:
+                        self.last_pondered_ply = event.ply
                         # Yield interim pondering event mid-think
                         trigger_delay = max(2.0, min(8.0, remaining_delay * 0.45))
                         await asyncio.sleep(trigger_delay)

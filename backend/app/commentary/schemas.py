@@ -136,6 +136,7 @@ class CommentaryContext(BaseModel):
     is_pondering: bool = Field(default=False, description="True if generating interim mid-think commentary")
     was_pondered: bool = Field(default=False, description="True if an interim pondering frame was already delivered for this move")
     candidate_suggestions: List[str] = Field(default_factory=list, description="Top prospective candidate moves for pondering")
+    ponder_style_hint: Optional[str] = Field(default=None, description="Rotating archetype style for natural pondering commentary")
     dialogue_history: List[DialogueTurn] = Field(
         default_factory=list,
         description="Recent dialogue history to ensure flow and prevent repetition"
