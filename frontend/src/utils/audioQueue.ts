@@ -31,6 +31,10 @@ class RadioAudioEngine {
         this.queue.push(turn);
       }
     }
+    // If audio is already playing and new turns arrive, speed up to catch up
+    if (this.currentAudio && this.queue.length > 0) {
+      this.currentAudio.playbackRate = 1.2;
+    }
     if (!this.isPlaying) {
       this.playNext();
     }
@@ -62,14 +66,14 @@ class RadioAudioEngine {
 
     this.isPlaying = true;
     const turn = this.queue.shift()!;
-    const audioUrl = turn.audio_url?.startsWith('http')
-      ? turn.audio_url
-      : `http://localhost:8000${turn.audio_url}`;
+    const audioUrl = turn.audio_url;
 
     try {
       const audio = new Audio(audioUrl);
       this.currentAudio = audio;
       audio.muted = this.isMuted;
+      // Smart catch-up speed ramp: 1.2x if backlog in queue, 1.0x if caught up
+      audio.playbackRate = this.queue.length > 0 ? 1.2 : 1.0;
 
       if (this.onSpeakerChange) {
         this.onSpeakerChange(turn.speaker, turn);

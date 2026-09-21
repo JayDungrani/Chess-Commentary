@@ -27,7 +27,11 @@ class Settings(BaseSettings):
 
     # Pacing Buffer Settings
     fast_forward_initial_history: bool = True
-    max_paced_move_delay_seconds: float = 60.0
+    max_paced_move_delay_seconds: float = 45.0
+    pacing_buffer_max_delay_bullet: float = 4.0
+    pacing_buffer_max_delay_blitz: float = 15.0
+    pacing_buffer_max_delay_rapid: float = 45.0
+    pacing_buffer_max_delay_classical: float = 120.0
 
     # Stockfish Engine Settings
     stockfish_path: str = r"C:\Users\PRINCE\Desktop\RAG\chess_engine\stockfish-windows-x86-64-universal\stockfish\stockfish-windows-x86-64-universal.exe"

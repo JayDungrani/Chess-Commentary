@@ -30,6 +30,15 @@ class SpeakingDynamic(str, Enum):
     SOLO_ANALYST = "SOLO_ANALYST"  # GM explains positional nuance or quiet maneuvers
     BANTER = "BANTER"              # Host tees up a question or reacts -> GM explains the position
     SILENCE = "SILENCE"            # Deliberate pause on trivial moves to allow audio buffer draining
+    PLAY_BY_PLAY = "PLAY_BY_PLAY"  # Rapid play-by-play move call (e.g., 'Bishop to e6.', 'Castles.')
+
+
+class ThinkCategory(str, Enum):
+    """Categorization of how long the player took to calculate their move."""
+    INSTANT = "instant"        # Blitzed out, premove, or automatic (< threshold)
+    NORMAL = "normal"          # Standard comfortable think
+    THINK = "think"            # Noticeable pause / calculation
+    DEEP_THINK = "deep_think"  # Deep tank / major time investment
 
 
 class CommentaryPriority(int, Enum):
@@ -121,6 +130,12 @@ class CommentaryContext(BaseModel):
     black_clock_seconds: Optional[float] = Field(default=None, description="Black's remaining clock time")
     is_time_trouble: bool = Field(default=False, description="True if active player is in critical time trouble")
     dynamic: SpeakingDynamic = Field(..., description="Director's selected speaking dynamic")
+    move_time_spent_seconds: float = Field(default=0.0, description="Duration in seconds spent thinking on this move")
+    think_category: ThinkCategory = Field(default=ThinkCategory.NORMAL, description="Think tempo classification relative to game format")
+    target_word_range: str = Field(default="12-20 words total", description="Adaptive word budget directive for commentators")
+    is_pondering: bool = Field(default=False, description="True if generating interim mid-think commentary")
+    was_pondered: bool = Field(default=False, description="True if an interim pondering frame was already delivered for this move")
+    candidate_suggestions: List[str] = Field(default_factory=list, description="Top prospective candidate moves for pondering")
     dialogue_history: List[DialogueTurn] = Field(
         default_factory=list,
         description="Recent dialogue history to ensure flow and prevent repetition"

@@ -54,6 +54,17 @@ class GameTerminationEvent:
     turns: Optional[int] = None
 
 
+@dataclass
+class PonderingEvent:
+    ply: int
+    turn: str                       # "white" | "black"
+    acting_player: str
+    fen: str                        # Current board FEN being contemplated
+    elapsed_think_seconds: float
+    white_clock_seconds: Optional[float] = None
+    black_clock_seconds: Optional[float] = None
+
+
 class ChessStateTracker:
     """
     Manages board state, move validation, clock delta tracking,

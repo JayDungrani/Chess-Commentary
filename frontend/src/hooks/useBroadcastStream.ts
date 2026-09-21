@@ -157,6 +157,17 @@ export function useBroadcastStream({
             break;
           }
 
+          case 'PONDERING': {
+            if (frame.commentary) {
+              setLatestCommentary(frame.commentary);
+              setTranscript((prev) => [...prev, frame.commentary!]);
+              if (autoPlayAudio && tts && frame.commentary.turns.length > 0) {
+                radioEngine.enqueueTurns(frame.commentary.turns);
+              }
+            }
+            break;
+          }
+
           case 'AUDIO_INTERRUPT': {
             // Immediate priority override: dump audio buffer for blunders/brilliancies
             radioEngine.interrupt();

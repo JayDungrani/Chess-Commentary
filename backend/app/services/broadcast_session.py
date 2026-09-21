@@ -19,7 +19,7 @@ from google.genai import types
 from pydantic import BaseModel, ConfigDict, Field
 
 CURRENT_DIR = Path(__file__).resolve().parent
-BACKEND_DIR = CURRENT_DIR.parent
+BACKEND_DIR = CURRENT_DIR.parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.append(str(BACKEND_DIR))
 
@@ -39,6 +39,7 @@ from app.lichess.pgn_parser import (
     GameMetadata,
     PlayerInfo,
     GameTerminationEvent,
+    PonderingEvent,
 )
 from app.engine.stockfish_pool import StockfishEngine
 from app.engine.opening_book import OpeningBook, GameOpeningTracker
@@ -73,6 +74,7 @@ class BroadcastEventType(str, Enum):
     MOVE = "MOVE"
     TERMINATION = "TERMINATION"
     AUDIO_INTERRUPT = "AUDIO_INTERRUPT"
+    PONDERING = "PONDERING"
     ERROR = "ERROR"
 
 
@@ -352,6 +354,7 @@ class BroadcastSession:
         self.paced_streamer: Optional[PacedMoveStreamer] = None
         self.is_running: bool = False
         self._stop_event = asyncio.Event()
+        self._last_move_pondered: bool = False
 
     async def start(self) -> None:
         self.is_running = True
@@ -723,6 +726,7 @@ class BroadcastSession:
         black_name = "Black"
         game_speed = "classical" if self.round_id else "blitz"
         game_concluded = False
+        self._last_move_pondered = False
 
         try:
             async for event in self.paced_streamer.stream_paced_events():
@@ -732,6 +736,7 @@ class BroadcastSession:
                 is_meta = type(event).__name__ == "GameMetadata"
                 is_move = type(event).__name__ == "ParsedMoveEvent"
                 is_termination = type(event).__name__ == "GameTerminationEvent"
+                is_pondering = type(event).__name__ == "PonderingEvent" or isinstance(event, PonderingEvent)
 
                 if is_meta:
                     white_name = event.white_player.username
@@ -740,6 +745,8 @@ class BroadcastSession:
 
                     self.analyzer.reset()
                     self.director.reset(game_format=game_speed)
+                    if not is_live_event and hasattr(self.paced_streamer, "set_game_format"):
+                        self.paced_streamer.set_game_format(game_speed)
 
                     yield BroadcastFrame(
                         event_type=BroadcastEventType.METADATA,
@@ -747,6 +754,57 @@ class BroadcastSession:
                         round_id=self.round_id,
                         fen=chess.STARTING_FEN,
                         metadata=event,
+                    )
+                    continue
+
+                elif is_pondering:
+                    analysis = self.analyzer.previous_analysis
+                    if not analysis:
+                        try:
+                            analysis = await self.analyzer.engine.analyze_position(event.fen or self.analyzer.board.fen())
+                            self.analyzer.previous_analysis = analysis
+                        except Exception as exc:
+                            logger.warning(f"Engine pondering analysis failed: {exc}")
+                            analysis = None
+
+                    candidate_suggestions = []
+                    if analysis and getattr(analysis, "lines", None):
+                        for line in analysis.lines[:2]:
+                            if getattr(line, "primary_move_san", None):
+                                candidate_suggestions.append(line.primary_move_san)
+
+                    context = self.director.assemble_pondering_context(
+                        ply=event.ply,
+                        turn=event.turn,
+                        acting_player=event.acting_player,
+                        fen=event.fen or self.analyzer.board.fen(),
+                        elapsed_think_seconds=event.elapsed_think_seconds,
+                        candidate_suggestions=candidate_suggestions,
+                        white_player=white_name,
+                        black_player=black_name,
+                        white_clock_seconds=event.white_clock_seconds,
+                        black_clock_seconds=event.black_clock_seconds,
+                    )
+
+                    exchange = await self.agent.generate_commentary(context)
+
+                    if self.tts_service and self.enable_tts:
+                        exchange = await self.tts_service.synthesize_exchange(
+                            exchange=exchange,
+                            game_id=self.game_id,
+                        )
+
+                    self.director.record_exchange(exchange)
+                    self._last_move_pondered = True
+
+                    yield BroadcastFrame(
+                        event_type=BroadcastEventType.PONDERING,
+                        game_id=self.game_id,
+                        round_id=self.round_id,
+                        ply=event.ply,
+                        fen=event.fen or self.analyzer.board.fen(),
+                        turn=event.turn,
+                        commentary=exchange,
                     )
                     continue
 
@@ -823,7 +881,9 @@ class BroadcastSession:
                         white_player=white_name,
                         black_player=black_name,
                         pending_audio_seconds=pending_audio,
+                        was_pondered=self._last_move_pondered,
                     )
+                    self._last_move_pondered = False
 
                     exchange = await self.agent.generate_commentary(context)
 
@@ -977,6 +1037,15 @@ async def main():
                 next_to_move = "Black" if eval_data.turn == "white" else "White"
                 print(f"\n{C_DIM}⏳ Waiting for {next_to_move}'s move (polling Lichess relay)...{C_RESET}", end="", flush=True)
         
+            elif frame.event_type == BroadcastEventType.PONDERING:
+                turn_str = "White" if frame.turn == "white" else "Black"
+                print(f"\n{C_YELLOW}🤔 [PONDERING]{C_RESET} {turn_str} is in the tank, weighing candidate options...")
+                if frame.commentary and frame.commentary.turns:
+                    for turn in frame.commentary.turns:
+                        color = C_CYAN if turn.speaker.value == "HOST" else C_GREEN
+                        audio_tag = f" {C_DIM}[Audio: {turn.audio_url}]{C_RESET}" if turn.audio_url else ""
+                        print(f"  🎙️ {color}[{turn.speaker.value}]{C_RESET} ({turn.emotion.value}): \"{turn.text}\"{audio_tag}")
+
             elif frame.event_type == BroadcastEventType.AUDIO_INTERRUPT:
                 print(f"  {C_RED}⚡ [AUDIO INTERRUPT] Clearing audio buffer for urgent blunder/brilliancy!{C_RESET}")
 

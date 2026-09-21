@@ -5,32 +5,73 @@ import logging
 import time
 from typing import AsyncGenerator, Optional, Union
 
-from app.lichess.pgn_parser import GameMetadata, ParsedMoveEvent
+import chess
+
+from app.config import settings
+from app.lichess.pgn_parser import (
+    GameMetadata,
+    ParsedMoveEvent,
+    GameTerminationEvent,
+    PonderingEvent,
+)
 
 logger = logging.getLogger(__name__)
+
+PONDER_THRESHOLDS = {
+    "bullet": 999.0,
+    "ultra_bullet": 999.0,
+    "blitz": 8.0,
+    "rapid": 12.0,
+    "classical": 20.0,
+}
 
 
 class PacedMoveStreamer:
     """
     Buffers incoming Lichess moves and releases them according to player think times.
-    For live tournament broadcasts (max_delay=0), moves emit instantly without delay.
+    Adapts buffer limits dynamically based on game speed (e.g. Rapid vs Blitz)
+    and emits interim PonderingEvent frames during deep calculations.
     """
 
     def __init__(
         self,
         streamer,
         fast_forward_initial_history: bool = True,
-        max_paced_move_delay_seconds: float = 120.0,
+        max_paced_move_delay_seconds: float = 45.0,
         target_live_ply: Optional[int] = None,
+        game_format: Optional[str] = None,
+        enable_pondering: bool = True,
     ):
         self.streamer = streamer
         self.fast_forward_initial = fast_forward_initial_history
         self.max_paced_move_delay = max_paced_move_delay_seconds
         self.target_live_ply = target_live_ply
+        self.game_format = game_format
+        self.enable_pondering = enable_pondering
+        self._last_fen = chess.STARTING_FEN
 
-        self._queue: asyncio.Queue[Optional[Union[GameMetadata, ParsedMoveEvent, Exception]]] = asyncio.Queue()
+        if game_format:
+            self.set_game_format(game_format)
+
+        self._queue: asyncio.Queue[Optional[Union[GameMetadata, ParsedMoveEvent, GameTerminationEvent, PonderingEvent, Exception]]] = asyncio.Queue()
         self._producer_task: Optional[asyncio.Task] = None
         self._is_running = False
+
+    def set_game_format(self, game_format: str) -> None:
+        """Dynamically adapts the maximum buffer delay based on game speed."""
+        fmt = (game_format or "").lower()
+        self.game_format = fmt
+        if fmt in ("bullet", "ultra_bullet"):
+            self.max_paced_move_delay = getattr(settings, "pacing_buffer_max_delay_bullet", 4.0)
+        elif fmt == "blitz":
+            self.max_paced_move_delay = getattr(settings, "pacing_buffer_max_delay_blitz", 15.0)
+        elif fmt == "rapid":
+            self.max_paced_move_delay = getattr(settings, "pacing_buffer_max_delay_rapid", 45.0)
+        elif fmt == "classical":
+            self.max_paced_move_delay = getattr(settings, "pacing_buffer_max_delay_classical", 120.0)
+        else:
+            self.max_paced_move_delay = getattr(settings, "max_paced_move_delay_seconds", 45.0)
+        logger.info(f"PacedMoveStreamer format set to '{game_format}', max pace delay: {self.max_paced_move_delay}s")
 
     async def _get_stream_generator(self):
         if hasattr(self.streamer, "stream_game_events"):
@@ -60,7 +101,7 @@ class PacedMoveStreamer:
 
     async def stream_paced_events(
         self,
-    ) -> AsyncGenerator[Union[GameMetadata, ParsedMoveEvent], None]:
+    ) -> AsyncGenerator[Union[GameMetadata, ParsedMoveEvent, GameTerminationEvent, PonderingEvent], None]:
         self._is_running = True
         self._producer_task = asyncio.create_task(self._producer_loop())
 
@@ -79,6 +120,11 @@ class PacedMoveStreamer:
 
                 # Emit metadata or termination packets without pacing
                 if type(event).__name__ in ("GameMetadata", "GameTerminationEvent"):
+                    if type(event).__name__ == "GameMetadata":
+                        if getattr(event, "speed", None):
+                            self.set_game_format(event.speed)
+                        if getattr(event, "initial_fen", None):
+                            self._last_fen = event.initial_fen
                     yield event
                     last_emit_wall_time = time.monotonic()
                     continue
@@ -87,12 +133,14 @@ class PacedMoveStreamer:
                     # 1. Fast-forward moves strictly BEFORE target_live_ply
                     if is_initial_catchup and self.target_live_ply and self.target_live_ply > 0:
                         if event.ply < self.target_live_ply:
+                            self._last_fen = event.fen
                             yield event
                             last_emit_wall_time = time.monotonic()
                             continue
                         elif event.ply == self.target_live_ply:
                             # Render current live move immediately, then exit catch-up mode
                             is_initial_catchup = False
+                            self._last_fen = event.fen
                             last_emit_wall_time = time.monotonic()
                             yield event
                             continue
@@ -103,20 +151,51 @@ class PacedMoveStreamer:
                     # For FIDE broadcasts (max_delay <= 0), emit immediately
                     if self.max_paced_move_delay <= 0.0:
                         last_emit_wall_time = time.monotonic()
+                        self._last_fen = event.fen
                         yield event
                         continue
 
                     # 2. Pace moves based on player think time (even if pre-buffered in _queue)
                     raw_delay = event.move_time_spent_seconds
                     target_delay = min(raw_delay, self.max_paced_move_delay)
-                    elapsed_wall_time = time.monotonic() - last_emit_wall_time
+                    move_start_wall_time = last_emit_wall_time
+                    elapsed_wall_time = time.monotonic() - move_start_wall_time
                     remaining_delay = target_delay - elapsed_wall_time
 
-                    if remaining_delay > 0:
-                        await asyncio.sleep(remaining_delay)
+                    ponder_threshold = PONDER_THRESHOLDS.get(self.game_format or "rapid", 12.0)
+                    should_ponder = (
+                        self.enable_pondering
+                        and target_delay >= ponder_threshold
+                        and remaining_delay > 4.0
+                    )
+
+                    if should_ponder:
+                        # Yield interim pondering event mid-think
+                        trigger_delay = max(2.0, min(8.0, remaining_delay * 0.45))
+                        await asyncio.sleep(trigger_delay)
+
+                        ponder_event = PonderingEvent(
+                            ply=max(0, event.ply - 1),
+                            turn=event.turn,
+                            acting_player=event.acting_player or ("White" if event.turn == "white" else "Black"),
+                            fen=self._last_fen,
+                            elapsed_think_seconds=round(time.monotonic() - move_start_wall_time, 2),
+                            white_clock_seconds=event.white_clock_seconds,
+                            black_clock_seconds=event.black_clock_seconds,
+                        )
+                        yield ponder_event
+
+                        # Sleep remainder of target think time
+                        remaining_delay = target_delay - (time.monotonic() - move_start_wall_time)
+                        if remaining_delay > 0:
+                            await asyncio.sleep(remaining_delay)
+                    else:
+                        if remaining_delay > 0:
+                            await asyncio.sleep(remaining_delay)
 
                     # 3. Timestamp right before yielding so commentary duration credits toward think time
                     last_emit_wall_time = time.monotonic()
+                    self._last_fen = event.fen
                     yield event
 
         finally:

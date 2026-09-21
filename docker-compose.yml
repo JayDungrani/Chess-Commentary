@@ -1,0 +1,46 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      STOCKFISH_PATH: /usr/games/stockfish
+    ports:
+      - "8000:8000"
+    volumes:
+      - tts-audio:/app/backend/static/audio
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "uv",
+          "run",
+          "--directory",
+          "/app",
+          "--no-sync",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  tts-audio:

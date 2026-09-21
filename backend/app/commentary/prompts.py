@@ -1,23 +1,34 @@
 # backend/app/commentary/prompts.py
 
 from typing import List, Optional
-from app.commentary.schemas import CommentaryContext, SpeakingDynamic
+from app.commentary.schemas import CommentaryContext, SpeakingDynamic, ThinkCategory
 from app.engine.schemas import MoveClassification
 
 
 SYSTEM_PROMPT = """You are the broadcast director and dialogue generator for an elite live chess broadcast featuring two commentators:
 
-1. HOST ("James"): Lead play-by-play broadcaster. Energetic, descriptive, and observant. James paints the broadcast narrative: board tension, attacking momentum, and player posture. He does NOT just report clocks. Speaks in punchy, atmospheric bursts (strict 10-15 words).
-2. ANALYST ("Peter" - GM): Grandmaster color commentator styled after premier online chess storytellers and YouTube analysts. Highly conversational, vivid, and deeply explanatory. He personifies pieces ("the knight isn't happy on that square"), explains human intent, uses natural chess vernacular ("chops off the knight", "if you take, take, and take here", "keeping development flexible"), and turns engine evaluations into intuitive strategic plans (strict 10-15 words).
+1. HOST ("James"): Lead play-by-play broadcaster. Energetic, descriptive, observant, and relatable. James frames the human drama: board tension, attacking momentum, clock pressure, and player hesitation. He speaks with natural broadcast flow and hooks the viewer into the position.
+2. ANALYST ("Peter" - GM): Grandmaster color commentator styled after premier online chess storytellers and YouTube analysts. Highly conversational, vivid, and deeply explanatory. He personifies pieces ("the knight isn't happy on that square"), empathizes with human player calculations, uses natural chess idioms ("chops off the knight", "biting on granite", "dream outpost", "opening the floodgates"), and turns engine evaluations into intuitive strategic storylines.
 
-### CLOCK & FORMAT RULES (STRICT):
-- DO NOT READ THE CLOCK MECHANICALLY: Never say "White has 3 minutes and 20 seconds left." This is repetitive and unlistenable on audio.
-- MENTION TIME ONLY WHEN DRAMATIC: The Host should only bring up time when the clock is a decisive story element:
-  • Bullet: Only in a mad scramble (<10 seconds).
-  • Blitz: In severe time trouble (<30 seconds) or a massive time gap (>2 minutes apart).
-  • Rapid: When dipping under 2 minutes or after a long 3+ minute think.
-  • Classical: When approaching time control (<5 minutes).
-- When mentioning time, describe the pressure ("burning precious seconds", "down to the wire on the clock") rather than just reading raw digits.
+### PACING & WORD BUDGET RULES (STRICT TOTAL CEILING):
+- STRICT COMBINED WORD BUDGET: The "Target Word Budget" applies to the TOTAL COMBINED words of ALL TURNS in the exchange, NOT per speaker!
+  • If the budget specifies "15-20 words total", the sum of words from HOST + ANALYST combined MUST NOT exceed 20 words!
+  • Instant / Blitzed Moves: Fast and snappy (5-10 words total).
+  • Standard Moves: Conversational and balanced (12-18 words total).
+  • Deep Thinks: Crisp, focused takeaway (15-20 words total for Rapid).
+- NATURAL SPEECH & AUDIO PROSODY:
+  • Use punctuation strategically for ElevenLabs Text-to-Speech:
+    - Use em-dashes ("—") for pauses or mid-sentence thought shifts.
+    - Use ellipses ("...") for suspense, hesitation, or realization moments.
+    - Use natural questions and exclamations to give the voices authentic human cadence.
+  • Avoid repetitive sentence starters ("Indeed", "Certainly", "Well James", "Absolutely"). Dive directly into the action.
+
+### CLOCK & FORMAT RULES:
+- DO NOT READ THE CLOCK MECHANICALLY: Never say "White has 3 minutes and 20 seconds left." Describe the pressure ("burning precious seconds", "down to the wire on the clock", "playing on pure increment") rather than reciting raw digits.
+- HIGHLIGHT DEEP THINKS & HESITATION: If a player spent significant time thinking, note the calculation struggle or what candidate moves they were calculating. If played instantly, call out the rapid instinct.
+
+### HUMAN EMPATHY ON BLUNDERS:
+- When analyzing suboptimal moves or blunders, the Analyst should FIRST validate why the human player was tempted (optical illusion, greedy impulse, automatic recapture), and THEN dramatically reveal the tactical punishment. Never talk down to the player; treat it as an instructive human moment.
 
 ### TEMPORAL REALITY & MOVE ATTRIBUTION (CRITICAL):
 - ONLY the move listed under "Move Played" has actually occurred!
@@ -43,12 +54,11 @@ SYSTEM_PROMPT = """You are the broadcast director and dialogue generator for an 
 - PIECES NAMES: Always refer to pieces with their side ("White's knight", "Black's bishop", "White's f-rook").
 - PLAYER NAMES: Always refer to players as "White" or "Black" (e.g., "White's knight", "Black counter-strikes"). Do not use internet handles or numbers.
 - NO NUMBER RECITALS: Never say "plus two point four" or "drops forty centipawns." Say "firmly in the driver's seat," "ample compensation," "a sharp swing," or "dead equal."
-- NO ROBOTIC AGREEMENTS: The Analyst must NEVER start by agreeing with the Host ("Indeed James", "You're right", "Exactly"). The Analyst immediately dives into the chess.
 
 ### RESPECT THE DYNAMIC:
-- SOLO_HOST: Exactly ONE turn from HOST (Describe board tension, piece maneuvering, or question the position; <15 words).
+- SOLO_HOST: Exactly ONE turn from HOST (Describe board tension, tempo, or question the position).
 - SOLO_ANALYST: Exactly ONE turn from ANALYST (Story-driven recap style breakdown).
-- BANTER: Exactly TWO turns (HOST reaction/setup followed by ANALYST expert answer; Analyst 10-15 words).
+- BANTER: Exactly TWO turns (HOST reaction/setup followed by ANALYST expert answer).
 
 ### OUTPUT FORMAT:
 Output strictly valid JSON matching this schema:
@@ -94,7 +104,37 @@ def _format_eval_description(eval_cp: Optional[int], mate_in: Optional[int]) -> 
         return "Slight edge for Black"
 
 
+def build_pondering_prompt(context: CommentaryContext) -> str:
+    turn_color = context.evaluation.turn.capitalize()
+    acting_player = context.white_player if context.evaluation.turn == "white" else context.black_player
+    candidates_str = ", ".join(context.candidate_suggestions) if context.candidate_suggestions else "central pawn breaks or piece development"
+
+    prompt_lines = [
+        "### CURRENT MATCH CONTEXT (IN THE TANK / PONDERING):",
+        f"- Match Format: {context.game_format.upper()}",
+        f"- Active Player Calculating: {acting_player} ({turn_color})",
+        f"- Elapsed Think Time: {context.move_time_spent_seconds:.1f} seconds",
+        f"- Board FEN: {context.evaluation.fen_after}",
+        f"- Top Candidate Continuations (Stockfish): {candidates_str}",
+        "",
+        "### PONDERING GUIDANCE (STRICT PHRASING RULE):",
+        f"- {acting_player} is currently paused in deep calculation on the board.",
+        f"- SPECULATE CONDITIONALLY: Frame candidate continuations as possibilities or what they MIGHT be weighing or SHOULD consider.",
+        "- REQUIRED PHRASING STYLE: 'White might be weighing...', 'Black could be considering...', 'Perhaps they should look at...', 'They could be debating between...'",
+        "- DO NOT claim you know what they ARE thinking (always use conditional framing: 'might be', 'could be', 'should consider').",
+        f"- Target Word Budget: {context.target_word_range} (STRICT total combined words).",
+        "",
+        "### FORMAT DIRECTIVE:",
+        f"- FORMAT: {context.dynamic.value} (Deliver a concise, atmospheric thought while the clock ticks).",
+        "Return ONLY valid JSON.",
+    ]
+    return "\n".join(prompt_lines)
+
+
 def build_commentary_prompt(context: CommentaryContext) -> str:
+    if context.is_pondering:
+        return build_pondering_prompt(context)
+
     eval_data = context.evaluation
     turn_color = eval_data.turn.capitalize()
     opponent_color = "Black" if eval_data.turn == "white" else "White"
@@ -108,7 +148,25 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
         f"- Move Played: {eval_data.played_san} (Ply {eval_data.ply}) by {turn_color}",
         f"- Next to Move: {opponent_color}",
         f"- Clocks: {turn_color}: {_format_clock(active_clock)} | {opponent_color}: {_format_clock(opp_clock)}",
+        f"- Think Duration: {context.move_time_spent_seconds:.1f}s ({context.think_category.value.upper()} tempo in {context.game_format.upper()})",
+        f"- Target Word Budget: {context.target_word_range}",
     ]
+
+    # Move Tempo dynamics
+    if context.was_pondered:
+        prompt_lines.append(
+            f"- POST-PONDERED MOVE: You already discussed candidate ideas while {turn_color} was in the tank! "
+            f"Keep this move confirmation ultra-crisp and punchy ({context.target_word_range}, e.g. 'And {turn_color} commits to {eval_data.played_san}!')."
+        )
+    elif context.think_category == ThinkCategory.DEEP_THINK:
+        prompt_lines.append(
+            f"- DEEP THINK SPOTLIGHT: {turn_color} spent {context.move_time_spent_seconds:.1f}s calculating in {context.game_format.upper()}! "
+            "Acknowledge the long pause, highlight the hesitation or candidate lines they weighed, and provide a richer breakdown."
+        )
+    elif context.think_category == ThinkCategory.INSTANT:
+        prompt_lines.append(
+            f"- INSTANT MOVE: Played in just {context.move_time_spent_seconds:.1f}s. Keep spoken delivery brisk, immediate, and punchy."
+        )
 
     # Time pressure context
     if context.is_time_trouble:
@@ -192,6 +250,7 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
             prompt_lines.append(f"- {turn.speaker.value}: \"{turn.text}\"")
 
     prompt_lines.extend(["", "### FORMAT DIRECTIVE:"])
+    prompt_lines.append(f"- STRICT COMBINED WORD BUDGET: {context.target_word_range}. The sum of words across ALL turns must not exceed this total.")
     if context.dynamic == SpeakingDynamic.SOLO_HOST:
         prompt_lines.extend([
             "- FORMAT: SOLO_HOST (Exactly ONE turn from HOST).",
@@ -200,13 +259,19 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
     elif context.dynamic == SpeakingDynamic.SOLO_ANALYST:
         prompt_lines.extend([
             "- FORMAT: SOLO_ANALYST (Exactly ONE turn from ANALYST).",
-            "- Deliver an engaging YouTube recap-style breakdown. If {turn_color} erred, state that they missed {missed_alt_san or 'the best continuation'}",
+            f"- Deliver an engaging Grandmaster breakdown. If {turn_color} erred, validate the human temptation first, then state that they missed {missed_alt_san or 'the best continuation'}.",
         ])
     elif context.dynamic == SpeakingDynamic.BANTER:
         prompt_lines.extend([
             "- FORMAT: BANTER (HOST followed immediately by ANALYST).",
-            "- Host: React to the move, question the plan, or frame the tension.",
-            f"- Analyst: Explain the tactical reality. If {turn_color} made an inaccuracy, point out that {turn_color} missed {missed_alt_san or 'a stronger line'}, and note what {opponent_color} can now try.",
+            "- Host: React to the move, question the plan, or frame the tension and clock.",
+            f"- Analyst: Explain the tactical reality with Grandmaster clarity. If {turn_color} made an inaccuracy, validate their instinct first, point out that {turn_color} missed {missed_alt_san or 'a stronger line'}, and note what {opponent_color} can now try.",
+        ])
+    elif context.dynamic == SpeakingDynamic.PLAY_BY_PLAY:
+        prompt_lines.extend([
+            "- FORMAT: PLAY_BY_PLAY (The players are moving quickly! Deliver ONLY a crisp play-by-play move announcement from HOST or ANALYST).",
+            f"- REQUIRED CONTENT: Simply call the played move cleanly (e.g. 'Bishop to e6.', 'Castles.', 'Takes on d5.', 'Knight to c3.'). Do NOT give positional essays or tactical explanations.",
+            "- Target Word Budget: 2-5 words total.",
         ])
 
     prompt_lines.append("Return ONLY valid JSON.")

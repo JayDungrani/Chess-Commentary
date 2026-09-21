@@ -118,10 +118,17 @@ def render_broadcast_screen(
     b_clk = format_clock(event.black_clock_seconds)
 
     print("\n" + "═" * 84)
+    think_badge = ""
+    t = getattr(event, "move_time_spent_seconds", 0.0)
+    if t >= 25.0:
+        think_badge = f" {C_YELLOW}🧠 [DEEP THINK]{C_RESET}"
+    elif t <= 1.5:
+        think_badge = f" {C_DIM}⚡ [INSTANT]{C_RESET}"
+
     print(
         f" {C_BOLD}{prefix:<6} {eval_data.played_san:<7}{C_RESET} (uci: {eval_data.played_uci}) | "
         f"By: {player:<14} | "
-        f"Think: {event.move_time_spent_seconds:>4.1f}s | "
+        f"Think: {t:>4.1f}s{think_badge} | "
         f"Clocks: W {w_clk} / B {b_clk}"
     )
     print("─" * 84)
@@ -246,7 +253,7 @@ async def run_live_commentary(game_id: str, replay_all: bool = False):
                 print(f"Format: {event.speed.upper()} | Game ID: {event.game_id}")
                 print("=" * 84)
                 analyzer.reset()
-                director.reset()
+                director.reset(game_format=event.speed)
                 continue
 
             elif isinstance(event, ParsedMoveEvent):

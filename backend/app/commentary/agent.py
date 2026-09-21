@@ -20,6 +20,7 @@ from app.commentary.schemas import (
     CommentaryEmotion,
     SpeakingDynamic,
     CommentaryPriority,
+    ThinkCategory,
 )
 from app.commentary.prompts import SYSTEM_PROMPT, build_commentary_prompt
 from app.engine.schemas import MoveClassification
@@ -29,6 +30,87 @@ load_dotenv()
 
 # Low-latency production model for real-time commentary
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
+
+
+def san_to_spoken_move(san: str) -> str:
+    """
+    Converts standard algebraic notation (SAN) into a clean, spoken chess call.
+    Examples:
+        'Be6'     -> 'Bishop to e6.'
+        'O-O'     -> 'Castles.'
+        'O-O-O'   -> 'Castles queenside.'
+        'Nxd5'    -> 'Knight takes on d5.'
+        'exd5'    -> 'Takes on d5.'
+        'Qh5+'    -> 'Queen to h5, check!'
+        'Qxf7#'   -> 'Queen takes on f7, checkmate!'
+        'e4'      -> 'e4.'
+        'e8=Q'    -> 'Pawn promotes to Queen.'
+    """
+    if not san or san in ("...", "thinking...", "0000"):
+        return "Move played."
+
+    clean = san.strip().rstrip("!?")
+    is_mate = clean.endswith("#")
+    is_check = clean.endswith("+")
+    clean = clean.rstrip("+#")
+
+    # Castling
+    if clean in ("O-O", "0-0"):
+        suffix = ", checkmate!" if is_mate else (", check!" if is_check else ".")
+        return f"Castles{suffix}"
+    if clean in ("O-O-O", "0-0-0"):
+        suffix = ", checkmate!" if is_mate else (", check!" if is_check else ".")
+        return f"Castles queenside{suffix}"
+
+    # Promotion
+    prom_piece = None
+    if "=" in clean:
+        parts = clean.split("=")
+        clean = parts[0]
+        prom_piece = {"Q": "Queen", "R": "Rook", "B": "Bishop", "N": "Knight"}.get(parts[1], "Queen")
+
+    # Check for capture
+    is_capture = "x" in clean
+
+    PIECE_NAMES = {
+        "N": "Knight",
+        "B": "Bishop",
+        "R": "Rook",
+        "Q": "Queen",
+        "K": "King",
+    }
+
+    first_char = clean[0]
+    if first_char in PIECE_NAMES:
+        piece = PIECE_NAMES[first_char]
+        dest_square = clean[-2:] if len(clean) >= 2 else ""
+        if is_capture:
+            spoken = f"{piece} takes on {dest_square}"
+        else:
+            spoken = f"{piece} to {dest_square}"
+    else:
+        # Pawn move
+        if is_capture:
+            dest_square = clean[-2:] if len(clean) >= 2 else ""
+            if prom_piece:
+                spoken = f"Takes on {dest_square}, promoting to {prom_piece}"
+            else:
+                spoken = f"Takes on {dest_square}"
+        else:
+            if prom_piece:
+                spoken = f"Pawn promotes to {prom_piece}"
+            else:
+                dest_square = clean[-2:] if len(clean) >= 2 else clean
+                spoken = dest_square
+
+    if is_mate:
+        spoken += ", checkmate!"
+    elif is_check:
+        spoken += ", check!"
+    else:
+        spoken += "."
+
+    return spoken
 
 
 class CommentaryAgent:
@@ -202,6 +284,38 @@ class CommentaryAgent:
         eval_data = context.evaluation
         player = context.white_player if eval_data.turn == "white" else context.black_player
 
+        if context.dynamic == SpeakingDynamic.PLAY_BY_PLAY:
+            spoken_call = san_to_spoken_move(eval_data.played_san)
+            return [
+                DialogueTurn(
+                    speaker=CommentatorRole.HOST,
+                    text=spoken_call,
+                    emotion=CommentaryEmotion.NEUTRAL,
+                    priority=priority,
+                )
+            ]
+
+        if context.is_pondering:
+            cands = ", ".join(context.candidate_suggestions[:2]) if context.candidate_suggestions else "candidate breaks"
+            return [
+                DialogueTurn(
+                    speaker=CommentatorRole.ANALYST,
+                    text=f"{player} might be weighing options here, perhaps considering {cands}.",
+                    emotion=CommentaryEmotion.ANALYTICAL,
+                    priority=priority,
+                )
+            ]
+
+        if context.was_pondered:
+            return [
+                DialogueTurn(
+                    speaker=CommentatorRole.HOST,
+                    text=f"And the decision is {eval_data.played_san}.",
+                    emotion=CommentaryEmotion.NEUTRAL,
+                    priority=priority,
+                )
+            ]
+
         if eval_data.is_blunder:
             return [
                 DialogueTurn(
@@ -246,6 +360,23 @@ class CommentaryAgent:
                     emotion=CommentaryEmotion.NEUTRAL,
                     priority=priority,
                 )
+            ]
+
+        if context.think_category == ThinkCategory.DEEP_THINK:
+            think_dur = int(context.move_time_spent_seconds)
+            return [
+                DialogueTurn(
+                    speaker=CommentatorRole.HOST,
+                    text=f"After a deep think of {think_dur} seconds, {player} commits to {eval_data.played_san}.",
+                    emotion=CommentaryEmotion.TENSE,
+                    priority=priority,
+                ),
+                DialogueTurn(
+                    speaker=CommentatorRole.ANALYST,
+                    text="A critical juncture in the game—taking the time to calculate the complications before making a stand.",
+                    emotion=CommentaryEmotion.ANALYTICAL,
+                    priority=priority,
+                ),
             ]
 
         return [

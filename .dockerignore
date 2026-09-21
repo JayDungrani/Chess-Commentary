@@ -1,0 +1,33 @@
+# Version control
+.git
+.gitignore
+
+# Python & testing
+**/__pycache__
+**/*.py[cod]
+**/*.so
+.venv
+venv/
+ENV/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+backend/notebooks/
+
+# Node & Frontend
+**/node_modules/
+**/dist/
+frontend/dist/
+frontend/node_modules/
+.npm
+*.log
+
+# Audio artifacts
+backend/static/audio/*.mp3
+
+# Editor / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

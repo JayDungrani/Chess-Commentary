@@ -3,6 +3,7 @@ export type BroadcastEventType =
   | 'MOVE'
   | 'TERMINATION'
   | 'AUDIO_INTERRUPT'
+  | 'PONDERING'
   | 'ERROR';
 
 export type CommentatorRole = 'HOST' | 'ANALYST';
