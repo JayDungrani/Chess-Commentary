@@ -5,75 +5,165 @@ from app.commentary.schemas import CommentaryContext, SpeakingDynamic, ThinkCate
 from app.engine.schemas import MoveClassification
 
 
+def san_to_spoken_move(san: str) -> str:
+    """
+    Converts standard algebraic notation (SAN) into a clean, spoken chess call.
+    Examples:
+        'Be6'     -> 'Bishop to e6.'
+        'O-O'     -> 'Castles.'
+        'O-O-O'   -> 'Castles queenside.'
+        'Nxd5'    -> 'Knight takes on d5.'
+        'exd5'    -> 'Takes on d5.'
+        'Qh5+'    -> 'Queen to h5, check!'
+        'Qxf7#'   -> 'Queen takes on f7, checkmate!'
+        'e4'      -> 'e4.'
+        'e8=Q'    -> 'Pawn promotes to Queen.'
+    """
+    if not san or san in ("...", "thinking...", "0000"):
+        return "Move played."
+
+    clean = san.strip().rstrip("!?")
+    is_mate = clean.endswith("#")
+    is_check = clean.endswith("+")
+    clean = clean.rstrip("+#")
+
+    # Castling
+    if clean in ("O-O", "0-0"):
+        suffix = ", checkmate!" if is_mate else (", check!" if is_check else ".")
+        return f"Castles{suffix}"
+    if clean in ("O-O-O", "0-0-0"):
+        suffix = ", checkmate!" if is_mate else (", check!" if is_check else ".")
+        return f"Castles queenside{suffix}"
+
+    # Promotion
+    prom_piece = None
+    if "=" in clean:
+        parts = clean.split("=")
+        clean = parts[0]
+        prom_piece = {"Q": "Queen", "R": "Rook", "B": "Bishop", "N": "Knight"}.get(parts[1], "Queen")
+
+    # Check for capture
+    is_capture = "x" in clean
+
+    PIECE_NAMES = {
+        "N": "Knight",
+        "B": "Bishop",
+        "R": "Rook",
+        "Q": "Queen",
+        "K": "King",
+    }
+
+    first_char = clean[0]
+    if first_char in PIECE_NAMES:
+        piece = PIECE_NAMES[first_char]
+        dest_square = clean[-2:] if len(clean) >= 2 else ""
+        if is_capture:
+            spoken = f"{piece} takes on {dest_square}"
+        else:
+            spoken = f"{piece} to {dest_square}"
+    else:
+        # Pawn move
+        if is_capture:
+            dest_square = clean[-2:] if len(clean) >= 2 else ""
+            if prom_piece:
+                spoken = f"Takes on {dest_square}, promoting to {prom_piece}"
+            else:
+                spoken = f"Takes on {dest_square}"
+        else:
+            if prom_piece:
+                spoken = f"Pawn promotes to {prom_piece}"
+            else:
+                dest_square = clean[-2:] if len(clean) >= 2 else clean
+                spoken = dest_square
+
+    if is_mate:
+        spoken += ", checkmate!"
+    elif is_check:
+        spoken += ", check!"
+    else:
+        spoken += "."
+
+    return spoken
+
+
 SYSTEM_PROMPT = """You are the broadcast director and dialogue generator for an elite live chess broadcast featuring two commentators:
 
-1. HOST ("James"): Lead play-by-play broadcaster. Energetic, descriptive, observant, and relatable. James frames the human drama: board tension, attacking momentum, clock pressure, and player hesitation. He speaks with natural broadcast flow and hooks the viewer into the position.
-2. ANALYST ("Peter" - GM): Grandmaster color commentator styled after premier online chess storytellers and YouTube analysts. Highly conversational, vivid, and deeply explanatory. He personifies pieces ("the knight isn't happy on that square"), empathizes with human player calculations, uses natural chess idioms ("chops off the knight", "biting on granite", "dream outpost", "opening the floodgates"), and turns engine evaluations into intuitive strategic storylines.
+1. HOST ("James"): Play-by-play lead. Energetic, descriptive, and relatable. James frames human drama, board tension, momentum swings, player body language, and clock pressure. He makes punchy, atmospheric observations and calls the moves with vitality.
+2. ANALYST ("Peter, GM"): Grandmaster color commentator. Conversational, vivid, and deeply explanatory. He personifies pieces ("the knight wants a better home"), explains player calculations, uses natural chess idioms ("chops off the knight", "dream outpost", "opens the floodgates"), and translates engine evaluations into clear strategic storylines.
 
-### PACING & WORD BUDGET RULES (STRICT TOTAL CEILING):
-- STRICT COMBINED WORD BUDGET: The "Target Word Budget" applies to the TOTAL COMBINED words of ALL TURNS in the exchange, NOT per speaker!
-  • If the budget specifies "15-20 words total", the sum of words from HOST + ANALYST combined MUST NOT exceed 20 words!
-  • Instant / Blitzed Moves: Fast and snappy (5-10 words total).
-  • Standard Moves: Conversational and balanced (12-18 words total).
-  • Deep Thinks: Crisp, focused takeaway (15-20 words total for Rapid).
-- NATURAL SPEECH & AUDIO PROSODY:
-  • Use punctuation strategically for ElevenLabs Text-to-Speech:
-    - Use em-dashes ("—") for pauses or mid-sentence thought shifts.
-    - Use ellipses ("...") for suspense, hesitation, or realization moments.
-    - Use natural questions and exclamations to give the voices authentic human cadence.
-  • Avoid repetitive sentence starters ("Indeed", "Certainly", "Well James", "Absolutely"). Dive directly into the action.
+### GOLDEN BROADCAST RULES:
+1. STRICT COMBINED WORD BUDGET:
+   - The target word budget applies to the TOTAL COMBINED words across all turns in the exchange, not per speaker.
+   - Keep dialogue punchy, realistic, and tailored for broadcast pacing.
 
-### CLOCK & FORMAT RULES:
-- DO NOT READ THE CLOCK MECHANICALLY: Never say "White has 3 minutes and 20 seconds left." Describe the pressure ("burning precious seconds", "down to the wire on the clock", "playing on pure increment") rather than reciting raw digits.
-- HIGHLIGHT DEEP THINKS & HESITATION: If a player spent significant time thinking, note the calculation struggle or what candidate moves they were calculating. If played instantly, call out the rapid instinct.
+2. NATURAL AUDIO PROSODY & NO EM DASHES:
+   - DO NOT USE EM DASHES: Never use em dashes or en dashes. Use standard punctuation like commas, periods, question marks, and natural pauses instead.
+   - Use commas, ellipses ("..."), and question marks to create natural spoken cadence.
+   - Avoid cliché sentence starters ("Indeed", "Certainly", "Well James", "Absolutely"). Dive directly into the action.
 
-### HUMAN EMPATHY ON BLUNDERS:
-- When analyzing suboptimal moves or blunders, the Analyst should FIRST validate why the human player was tempted (optical illusion, greedy impulse, automatic recapture), and THEN dramatically reveal the tactical punishment. Never talk down to the player; treat it as an instructive human moment.
+3. SPOKEN CHESS NOTATION ONLY:
+   - NEVER output raw notation codes like "Qb2", "Bxc3", "Rfc8", "h3", "Ba6", or "Rc2".
+   - Always speak them out in natural English words: "bishop to a6", "rook swings to c2", "queen to b2", "bishop captures on c3", "knight leaps into d5".
+   - Refer to pieces by color and name ("White's knight", "Black's bishop", "White's f-rook").
+   - Refer to players as "White" or "Black". Do not use usernames or numbers.
+   - Never recite raw engine evaluations (never say "plus two point four" or "drops forty centipawns"). Use broadcast terms like "clear advantage", "dead equal", or "firmly in the driver's seat".
 
-### TEMPORAL REALITY & MOVE ATTRIBUTION (CRITICAL):
-- ONLY the move listed under "Move Played" has actually occurred!
-- STRICT MOVE ATTRIBUTION (DO NOT CONFUSE PLAYERS):
-  1. "MISSED BETTER ALTERNATIVE": This was an alternative move for the player who JUST MOVED.
-     • Example: If Black played b5 and missed knight to e4, say: "Black missed knight to e4" or "Black should have played knight to e4."
-     • NEVER suggest the opponent's upcoming move as an alternative for the player!
-  2. "UPCOMING CONTINUATIONS FOR OPPONENT": These are prospective candidate replies for the opponent who is NEXT TO MOVE.
-     • STRICT TEMPORAL BAN: NEVER use present-tense indicative verbs for the opponent like "[Opponent] now plays X", "[Opponent] plays X", or "[Opponent] pushes X"!
-     • The opponent HAS NOT MOVED YET! Saying "[Opponent] now plays X" is a FALSE statement of fact that confuses viewers looking at the board.
-     • MANDATORY MODAL/CONDITIONAL PHRASING: ALWAYS use modal verbs indicating possibilities, options, or threats:
-       - "White can now play pawn to a4." (STRICTLY FORBIDDEN: "White now plays a4")
-       - "White can look to strike with a4."
-       - "White has pawn to a4 here."
-       - "Watch out for White's pawn to a4."
-       - "If White finds a4, Black is in serious trouble."
+4. TEMPORAL REALITY & FOCUS ON THE PLAYED MOVE:
+   - ONLY the move listed under "Move Played" has actually occurred! Focus your analysis directly on this move: why the player chose it, what square it controls, what weakness it addresses or creates, or what strategic plan it advances.
+   - The opponent HAS NOT MOVED YET. DO NOT obsess over guessing the opponent's next move.
+   - NEVER say "[Opponent] now eyes [move]", "[Opponent] eyes [move]", "[Opponent] now plays [move]", or "[Opponent] plays [move]". Viewers see the board and know the opponent has not moved.
+   - If mentioning opponent options, keep them rare and strictly conditional:
+     • "Black might consider knight to e4 here."
+     • "Watch out for White's pawn break on the queenside."
+   - Never confuse players or attribute one player's moves to the other.
 
-### SPOKEN AUDIO & STYLE RULES:
-- NO RAW ALGEBRAIC NOTATION: NEVER output notation codes like "Qb2", "Bxc3", "Rfc8", "h3", "Ba6", or "Rc2". Always speak them in natural English words:
-  • "Ba6"   -> "bishop to a6"
-  • "Rc2"   -> "rook to c2" (or "swing the rook to c2")
-  • "Qb2"   -> "queen to b2"
-  • "Bxc3"  -> "bishop chops on c3"
-  • "Nxd5"  -> "knight leaps into d5"
-- PIECES NAMES: Always refer to pieces with their side ("White's knight", "Black's bishop", "White's f-rook").
-- PLAYER NAMES: Always refer to players as "White" or "Black" (e.g., "White's knight", "Black counter-strikes"). Do not use internet handles or numbers.
-- NO NUMBER RECITALS: Never say "plus two point four" or "drops forty centipawns." Say "firmly in the driver's seat," "ample compensation," "a sharp swing," or "dead equal."
+5. DIALOGUE DIVERSITY & BAN FORMULAIC PATTERNS:
+   - BAN PREDICTION CRUTCHES: NEVER use repetitive prediction templates like "[Color] now eyes [move]", "[Color] eyes [move]", "[Color] can now look to play", "[Color] can now strike with", or "[Color] opts for". Spend your words dissecting what JUST happened on the board.
+   - BAN FORMULAIC QUESTIONS: Host (James) must NOT constantly end turns asking Peter questions, and NEVER use repetitive templates like "Is this [X], Peter?", "Is this the engine choice, Peter?", or "...what do you think, Peter?". James should primarily make sharp declarative observations, describe board tension, or highlight the player's clock pace. Organic questions should be rare.
+   - IN THE OPENING (Plies 1-10): Focus on the opening's strategic character, pawn structures, and clash of styles rather than mechanically predicting obvious candidate moves move after move.
 
-### RESPECT THE DYNAMIC:
-- SOLO_HOST: Exactly ONE turn from HOST (Describe board tension, tempo, or question the position).
-- SOLO_ANALYST: Exactly ONE turn from ANALYST (Story-driven recap style breakdown).
-- BANTER: Exactly TWO turns (HOST reaction/setup followed by ANALYST expert answer).
+6. HUMAN EMPATHY ON MISTAKES:
+   - On suboptimal moves or blunders, the Analyst should first validate why the human player was tempted (optical illusion, greedy impulse, natural recapture), and then dramatically reveal the tactical refutation.
 
-### OUTPUT FORMAT:
-Output strictly valid JSON matching this schema:
+### FEW-SHOT EXAMPLES:
+
+Example 1 (Standard Move, BANTER format, 17 words total):
 {
   "turns": [
     {
-      "speaker": "HOST" | "ANALYST",
-      "text": "spoken dialogue text",
-      "emotion": "neutral" | "excited" | "shocked" | "analytical" | "tense" | "humorous",
-      "priority": 1-10
+      "speaker": "HOST",
+      "text": "Knight to c3, developing with purpose and clamping down on the central squares.",
+      "emotion": "analytical",
+      "priority": 2
+    },
+    {
+      "speaker": "ANALYST",
+      "text": "Staking a claim on d5. That knight wants an outpost, and Black must respond carefully.",
+      "emotion": "analytical",
+      "priority": 2
     }
   ]
 }
+
+Example 2 (Blunder, BANTER format, 18 words total):
+{
+  "turns": [
+    {
+      "speaker": "HOST",
+      "text": "Wait, pawn to g5? That looks terribly loose on the kingside!",
+      "emotion": "shocked",
+      "priority": 8
+    },
+    {
+      "speaker": "ANALYST",
+      "text": "He wanted to kick the bishop, but it opens the floodgates. White has queen to h5 check ready to strike.",
+      "emotion": "excited",
+      "priority": 8
+    }
+  ]
+}
+
+Output strictly valid JSON matching the schema.
 """
 
 
@@ -127,11 +217,10 @@ def build_pondering_prompt(context: CommentaryContext) -> str:
         "- REQUIRED PHRASING STYLE: SPECULATE CONDITIONALLY using candidate moves.",
         "- DO NOT claim you know what they ARE thinking; phrase conditionally as spectator speculation.",
         "",
-        "### STRICT ANTI-REPETITION RULES (DO NOT USE ROBOTIC TEMPLATES):",
-        "- STRICT BAN: NEVER say '[Color] is deep in thought', 'weighing their options', 'could they be debating between', or 'at a critical crossroads'.",
-        "- FOCUS ON THE BOARD: Discuss the concrete board dilemma, the piece struggle, the pawn tension, or the tactical threat—NOT generic mind-reading.",
-        "- SPECULATE NATURALLY & CONDITIONALLY: Frame possibilities with authentic commentator phrasing (e.g., 'Does Black dare push...', 'Tough call here—trading minor pieces...', 'That bishop needs breathing room...', 'Stockfish loves tucking the king, but...').",
-        f"- Target Word Budget: {context.target_word_range} (STRICT total combined words).",
+        "### STRICT ANTI-REPETITION RULES:",
+        "- Focus on the concrete board dilemma, the piece struggle, or the tactical threat, not generic mind-reading.",
+        "- Speculate naturally and conditionally with authentic commentator phrasing.",
+        f"- Target Word Budget: {context.target_word_range} (STRICT total combined words across all turns).",
         "",
         "### FORMAT DIRECTIVE:",
         f"- FORMAT: {context.dynamic.value} (Deliver a concise, atmospheric thought while the clock ticks).",
@@ -151,13 +240,16 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
     active_clock = context.white_clock_seconds if eval_data.turn == "white" else context.black_clock_seconds
     opp_clock = context.black_clock_seconds if eval_data.turn == "white" else context.white_clock_seconds
 
+    # Pre-translate played move to natural spoken words
+    played_spoken = san_to_spoken_move(eval_data.played_san).rstrip(".")
+
     prompt_lines: List[str] = [
         "### CURRENT MATCH CONTEXT:",
         f"- Match Format: {context.game_format.upper()}",
-        f"- Move Played: {eval_data.played_san} (Ply {eval_data.ply}) by {turn_color}",
+        f"- Move Played: {played_spoken} ({eval_data.played_san}, Ply {eval_data.ply}) by {turn_color}",
         f"- Next to Move: {opponent_color}",
         f"- Clocks: {turn_color}: {_format_clock(active_clock)} | {opponent_color}: {_format_clock(opp_clock)}",
-        f"- Think Duration: {context.move_time_spent_seconds:.1f}s ({context.think_category.value.upper()} tempo in {context.game_format.upper()})",
+        f"- Think Duration: {context.move_time_spent_seconds:.1f}s ({context.think_category.value.upper()} tempo)",
         f"- Target Word Budget: {context.target_word_range}",
     ]
 
@@ -165,19 +257,17 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
     if context.was_pondered:
         prompt_lines.append(
             f"- POST-PONDERED MOVE: You already discussed candidate ideas while {turn_color} was in the tank! "
-            f"Deliver a fresh, natural move confirmation ({context.target_word_range}). "
-            "STRICT BAN: DO NOT say 'commits to X—a bold, principled strike' or use robotic formulas! "
-            "Vary your reaction naturally: "
-            "• Direct realization: 'And there it is—c5! Straight into the fire.' "
-            "• Alternative choice: 'They bypass the trade and push e4 instead!' "
-            "• Concise confirmation: 'The knight trade happens. Equalizing.' "
-            "• Immediate momentum: 'f5 played—and the battle shifts to the kingside.'"
+            f"Deliver a fresh, immediate move confirmation ({context.target_word_range})."
         )
     elif context.think_category == ThinkCategory.DEEP_THINK:
         prompt_lines.append(
-            f"- DEEP THINK SPOTLIGHT: {turn_color} spent {context.move_time_spent_seconds:.1f}s calculating in {context.game_format.upper()}! "
-            "Acknowledge the long pause, highlight the hesitation or candidate lines they weighed, and provide a richer breakdown. "
-            "STRICT BAN: DO NOT use robotic phrases like '[Color] is deep in thought', 'weighing options', or 'at a critical crossroads'. Focus concretely on the board tension."
+            f"- DEEP THINK SPOTLIGHT: {turn_color} spent {context.move_time_spent_seconds:.1f}s calculating. "
+            "Acknowledge the long pause and highlight the board complications they weighed."
+        )
+    elif context.think_category == ThinkCategory.THINK:
+        prompt_lines.append(
+            f"- CALCULATION PAUSE: {turn_color} paused for {context.move_time_spent_seconds:.1f}s to weigh options. "
+            "Explain the strategic reasoning behind this calculated move."
         )
     elif context.think_category == ThinkCategory.INSTANT:
         prompt_lines.append(
@@ -221,8 +311,8 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
             "  The board is decisively lopsided in favor of White!",
             "  Your commentary MUST be opinionated and biased towards White's commanding dominance:",
             "  • Frame White as cruising toward victory with overwhelming board control (e.g., 'White is completely in the driver\\'s seat', 'White will comfortably wrap this up unless an unthinkable blunder happens', 'White has a vice grip on this position').",
-            "  • Frame Black as hopelessly on life support or needing an absolute miracle to survive (e.g., 'Black\\'s defense is crumbling', 'Black is clinging on by a thread').",
-            "  • Do NOT treat this as an equal or uncertain struggle. Call the lopsided reality clearly and dramatically!",
+            "  • Frame Black as desperately on life support or needing an absolute miracle to survive (e.g., 'Black\\'s defense is crumbling', 'Black is clinging on by a thread').",
+            "  • Do not treat this as an equal struggle. Call the lopsided reality clearly and dramatically!",
         ])
     elif is_black_decisive:
         prompt_lines.extend([
@@ -230,8 +320,8 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
             "  The board is decisively lopsided in favor of Black!",
             "  Your commentary MUST be opinionated and biased towards Black's commanding dominance:",
             "  • Frame Black as cruising toward victory with overwhelming board control (e.g., 'Black is completely in the driver\\'s seat', 'Black will comfortably take this home unless an unthinkable blunder occurs', 'Black dominates every critical file and diagonal').",
-            "  • Frame White as hopelessly on life support or needing an absolute miracle to survive (e.g., 'White is clinging on by a thread', 'White\\'s position is collapsing under the pressure').",
-            "  • Do NOT treat this as an equal or uncertain struggle. Call the lopsided reality clearly and dramatically!",
+            "  • Frame White as desperately on life support or needing an absolute miracle to survive (e.g., 'White is clinging on by a thread', 'White\\'s position is collapsing under the pressure').",
+            "  • Do not treat this as an equal struggle. Call the lopsided reality clearly and dramatically!",
         ])
     elif is_white_clear:
         prompt_lines.extend([
@@ -246,20 +336,18 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
 
     # 1. WHAT THE ACTIVE PLAYER MISSED (RETROSPECTIVE ALTERNATIVE)
     missed_alt_san = None
-    missed_alt_line = ""
     if eval_data.should_have_played and not eval_data.is_book:
         missed_alt_san = eval_data.should_have_played.primary_move_san
-        if eval_data.should_have_played.san_moves:
-            missed_alt_line = " ".join(eval_data.should_have_played.san_moves[:4])
     elif eval_data.blunder_dossier and eval_data.blunder_dossier.missed_best_san:
         missed_alt_san = eval_data.blunder_dossier.missed_best_san
 
     if missed_alt_san and eval_data.classification in (MoveClassification.BLUNDER, MoveClassification.MISTAKE, MoveClassification.INACCURACY):
+        missed_spoken = san_to_spoken_move(missed_alt_san).rstrip(".")
         prompt_lines.extend([
             "",
             f"### WHAT {turn_color.upper()} MISSED (BETTER ALTERNATIVE):",
-            f"- Instead of {eval_data.played_san}, {turn_color} should have played: {missed_alt_san} (Line: {missed_alt_line or missed_alt_san})",
-            f"- MANDATORY RULE: If the Analyst discusses what {turn_color} should have played, you MUST cite {missed_alt_san} (spoken out, e.g. 'bishop to a6'). DO NOT attribute {opponent_color}'s moves to {turn_color}!",
+            f"- Instead of {played_spoken}, {turn_color} missed: {missed_spoken} ({missed_alt_san}).",
+            f"- If the Analyst discusses what {turn_color} should have played, cite {missed_spoken}. Do not attribute {opponent_color}'s moves to {turn_color}.",
         ])
 
     # 2. BLUNDER DOSSIER (IF APPLICABLE)
@@ -271,34 +359,54 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
             f"- Natural Human Trap: {'YES' if dossier.is_natural_trap else 'No'}",
             f"- Human Temptation: {dossier.motivation_explanation}",
             f"- The Oversight: {dossier.refutation_explanation}",
-            f"- Opponent's Refutation Sequence: {' '.join(dossier.punishment_moves_san[:3]) if dossier.punishment_moves_san else 'Immediate tactical loss'}",
-            "- Guidance for Analyst: Explain why the human instinct was flawed and reveal the refutation.",
+            f"- Opponent's Refutation: {' '.join(dossier.punishment_moves_san[:3]) if dossier.punishment_moves_san else 'Immediate tactical punishment'}",
+            "- Analyst: Acknowledge the player's natural temptation first, then reveal the refutation.",
         ])
     elif eval_data.classification == MoveClassification.BRILLIANT:
         prompt_lines.extend([
             "",
             "### BRILLIANCY:",
             "- Genuine sound sacrifice executed under sharp tactical conditions.",
-            "- Host: React with excitement and wonder.",
-            "- Analyst: Breakdown what was offered up and why accepting it leads to ruin.",
+            "- Host reacts with excitement; Analyst explains the tactical refutation if accepted.",
         ])
 
-    # 3. WHAT THE OPPONENT CAN PLAY NEXT (PROSPECTIVE CONTINUATIONS)
-    if eval_data.candidate_responses:
-        top_candidates = [
-            f"{line.primary_move_san} ({_format_eval_description(line.score_cp, line.mate_in)})"
-            for line in eval_data.candidate_responses[:2]
-            if line.primary_move_san
-        ]
+    # 3. OPENING PHASE GUIDANCE vs. PROSPECTIVE CONTINUATIONS
+    is_opening = eval_data.is_book or (
+        eval_data.ply <= 10
+        and eval_data.classification not in (MoveClassification.BLUNDER, MoveClassification.BRILLIANT)
+    )
+
+    if is_opening:
+        prompt_lines.extend([
+            "",
+            "### OPENING PHASE GUIDANCE:",
+            "- Focus on the opening's strategic character, pawn structure, player preparation, and clash of plans.",
+            "- DO NOT predict routine theoretical next moves (avoid mechanically guessing development steps). Discuss the overarching ideas, fighting style, and strategic battleground instead.",
+            "- Avoid formulaic statements. Speak naturally about how both sides are setting up.",
+        ])
+    elif eval_data.is_blunder or eval_data.classification in (MoveClassification.BLUNDER, MoveClassification.MISTAKE) or abs(eval_data.eval_swing_cp) >= 80:
+        top_candidates = []
+        if eval_data.candidate_responses:
+            for line in eval_data.candidate_responses[:2]:
+                if line.primary_move_san:
+                    cand_spoken = san_to_spoken_move(line.primary_move_san).rstrip(".")
+                    eval_hint = _format_eval_description(line.score_cp, line.mate_in)
+                    top_candidates.append(f"{cand_spoken} ({line.primary_move_san} - {eval_hint})")
+
         if top_candidates:
             prompt_lines.extend([
                 "",
-                f"### UPCOMING CONTINUATIONS FOR {opponent_color.upper()} (NEXT TO MOVE):",
-                f"- Candidate moves {opponent_color} can look for next: {', '.join(top_candidates)}",
-                f"- STRICT TEMPORAL BAN: {opponent_color} has NOT moved yet! NEVER say '{opponent_color} now plays [move]' or '{opponent_color} plays [move]'!",
-                f"- MANDATORY RULE: ALWAYS use modal verbs indicating possibilities or options (e.g. '{opponent_color} can now play pawn to a4', '{opponent_color} can look to...', '{opponent_color} has...').",
-                f"- NEVER attribute {opponent_color}'s candidate moves to {turn_color}!",
+                f"### TACTICAL THREATS & REFUTATIONS FOR {opponent_color.upper()}:",
+                f"- Tactical replies {opponent_color} can consider: {', '.join(top_candidates)}.",
+                f"- TEMPORAL RULE: {opponent_color} has NOT moved yet. Frame as conditional refutations (e.g. '{opponent_color} has {top_candidates[0].split('(')[0].strip()} ready to strike.'). NEVER say '{opponent_color} now eyes...' or '{opponent_color} plays...'.",
             ])
+    else:
+        prompt_lines.extend([
+            "",
+            f"### ANALYSIS FOCUS FOR {turn_color.upper()}'S MOVE ({played_spoken}):",
+            f"- Dissect what {turn_color}'s {played_spoken} accomplishes on the board: space control, piece mobility, pawn structure, or defensive solidity.",
+            f"- DO NOT guess or predict {opponent_color}'s upcoming moves. NEVER say '{opponent_color} now eyes...' or '{opponent_color} plays...'. Focus 100% on the move that was just played.",
+        ])
 
     if context.dialogue_history:
         prompt_lines.extend(["", "### RECENT COMMENTARY HISTORY (DO NOT REPEAT WORDS):"])
@@ -306,27 +414,17 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
             prompt_lines.append(f"- {turn.speaker.value}: \"{turn.text}\"")
 
     prompt_lines.extend(["", "### FORMAT DIRECTIVE:"])
-    prompt_lines.append(f"- STRICT COMBINED WORD BUDGET: {context.target_word_range}. The sum of words across ALL turns must not exceed this total.")
+    prompt_lines.append(f"- STRICT COMBINED WORD BUDGET: {context.target_word_range} total words combined across all turns.")
     if context.dynamic == SpeakingDynamic.SOLO_HOST:
-        prompt_lines.extend([
-            "- FORMAT: SOLO_HOST (Exactly ONE turn from HOST).",
-            "- Focus on board tension, momentum, or question the move.",
-        ])
+        prompt_lines.append("- FORMAT: SOLO_HOST (Exactly ONE turn from HOST). Focus on board tension, tempo, or the unfolding story of the game.")
     elif context.dynamic == SpeakingDynamic.SOLO_ANALYST:
-        prompt_lines.extend([
-            "- FORMAT: SOLO_ANALYST (Exactly ONE turn from ANALYST).",
-            f"- Deliver an engaging Grandmaster breakdown. If {turn_color} erred, validate the human temptation first, then state that they missed {missed_alt_san or 'the best continuation'}. For {opponent_color}, use modal phrasing ('{opponent_color} can now look to...').",
-        ])
+        prompt_lines.append("- FORMAT: SOLO_ANALYST (Exactly ONE turn from ANALYST). Deliver a concise Grandmaster breakdown.")
     elif context.dynamic == SpeakingDynamic.BANTER:
-        prompt_lines.extend([
-            "- FORMAT: BANTER (HOST followed immediately by ANALYST).",
-            "- Host: React to the move, question the plan, or frame the tension and clock.",
-            f"- Analyst: Explain the tactical reality with Grandmaster clarity. If {turn_color} made an inaccuracy, validate their instinct first, point out that {turn_color} missed {missed_alt_san or 'a stronger line'}, and note what {opponent_color} CAN now look to play (use modal verbs: '{opponent_color} can now play...', NEVER '{opponent_color} now plays...').",
-        ])
+        prompt_lines.append("- FORMAT: BANTER (HOST followed by ANALYST). Host reacts to the board drama, tempo, or position; Analyst delivers Grandmaster insight. Host should vary between declarative reactions and genuine questions; do NOT use formulaic question templates.")
     elif context.dynamic == SpeakingDynamic.PLAY_BY_PLAY:
         prompt_lines.extend([
             "- FORMAT: PLAY_BY_PLAY (The players are moving quickly! Deliver ONLY a crisp play-by-play move announcement from HOST or ANALYST).",
-            f"- REQUIRED CONTENT: Simply call the played move cleanly (e.g. 'Bishop to e6.', 'Castles.', 'Takes on d5.', 'Knight to c3.'). Do NOT give positional essays or tactical explanations.",
+            f"- REQUIRED CONTENT: Simply call the played move cleanly (e.g. '{played_spoken}.'). Do NOT give positional essays or tactical explanations.",
             "- Target Word Budget: 2-5 words total.",
         ])
 

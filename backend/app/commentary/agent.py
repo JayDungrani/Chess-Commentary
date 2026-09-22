@@ -21,8 +21,9 @@ from app.commentary.schemas import (
     SpeakingDynamic,
     CommentaryPriority,
     ThinkCategory,
+    LLMCommentaryOutput,
 )
-from app.commentary.prompts import SYSTEM_PROMPT, build_commentary_prompt
+from app.commentary.prompts import SYSTEM_PROMPT, build_commentary_prompt, san_to_spoken_move
 from app.engine.schemas import MoveClassification
 
 logger = logging.getLogger(__name__)
@@ -31,86 +32,6 @@ load_dotenv()
 # Low-latency production model for real-time commentary
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 
-
-def san_to_spoken_move(san: str) -> str:
-    """
-    Converts standard algebraic notation (SAN) into a clean, spoken chess call.
-    Examples:
-        'Be6'     -> 'Bishop to e6.'
-        'O-O'     -> 'Castles.'
-        'O-O-O'   -> 'Castles queenside.'
-        'Nxd5'    -> 'Knight takes on d5.'
-        'exd5'    -> 'Takes on d5.'
-        'Qh5+'    -> 'Queen to h5, check!'
-        'Qxf7#'   -> 'Queen takes on f7, checkmate!'
-        'e4'      -> 'e4.'
-        'e8=Q'    -> 'Pawn promotes to Queen.'
-    """
-    if not san or san in ("...", "thinking...", "0000"):
-        return "Move played."
-
-    clean = san.strip().rstrip("!?")
-    is_mate = clean.endswith("#")
-    is_check = clean.endswith("+")
-    clean = clean.rstrip("+#")
-
-    # Castling
-    if clean in ("O-O", "0-0"):
-        suffix = ", checkmate!" if is_mate else (", check!" if is_check else ".")
-        return f"Castles{suffix}"
-    if clean in ("O-O-O", "0-0-0"):
-        suffix = ", checkmate!" if is_mate else (", check!" if is_check else ".")
-        return f"Castles queenside{suffix}"
-
-    # Promotion
-    prom_piece = None
-    if "=" in clean:
-        parts = clean.split("=")
-        clean = parts[0]
-        prom_piece = {"Q": "Queen", "R": "Rook", "B": "Bishop", "N": "Knight"}.get(parts[1], "Queen")
-
-    # Check for capture
-    is_capture = "x" in clean
-
-    PIECE_NAMES = {
-        "N": "Knight",
-        "B": "Bishop",
-        "R": "Rook",
-        "Q": "Queen",
-        "K": "King",
-    }
-
-    first_char = clean[0]
-    if first_char in PIECE_NAMES:
-        piece = PIECE_NAMES[first_char]
-        dest_square = clean[-2:] if len(clean) >= 2 else ""
-        if is_capture:
-            spoken = f"{piece} takes on {dest_square}"
-        else:
-            spoken = f"{piece} to {dest_square}"
-    else:
-        # Pawn move
-        if is_capture:
-            dest_square = clean[-2:] if len(clean) >= 2 else ""
-            if prom_piece:
-                spoken = f"Takes on {dest_square}, promoting to {prom_piece}"
-            else:
-                spoken = f"Takes on {dest_square}"
-        else:
-            if prom_piece:
-                spoken = f"Pawn promotes to {prom_piece}"
-            else:
-                dest_square = clean[-2:] if len(clean) >= 2 else clean
-                spoken = dest_square
-
-    if is_mate:
-        spoken += ", checkmate!"
-    elif is_check:
-        spoken += ", check!"
-    else:
-        spoken += "."
-
-    return spoken
 
 
 class CommentaryAgent:
@@ -170,7 +91,32 @@ class CommentaryAgent:
                 is_interrupt=False,
             )
 
-        # 2. Priority & Interrupt Determination
+        # 2. Fast Play-by-Play Bypass (Zero-latency direct spoken move call, e.g. 'Bishop to e2.')
+        if context.dynamic == SpeakingDynamic.PLAY_BY_PLAY:
+            spoken_call = san_to_spoken_move(eval_data.played_san)
+            speaker = (
+                CommentatorRole.ANALYST
+                if context.dialogue_history and context.dialogue_history[-1].speaker == CommentatorRole.HOST
+                else CommentatorRole.HOST
+            )
+            pbp_turn = DialogueTurn(
+                speaker=speaker,
+                text=spoken_call,
+                emotion=CommentaryEmotion.NEUTRAL,
+                priority=CommentaryPriority.NORMAL.value,
+                estimated_duration_seconds=max(0.8, round(len(spoken_call.split()) / 2.5, 2)),
+            )
+            return CommentaryExchange(
+                ply=eval_data.ply,
+                move_san=eval_data.played_san,
+                turn_color=eval_data.turn,
+                dynamic=SpeakingDynamic.PLAY_BY_PLAY,
+                priority=CommentaryPriority.NORMAL.value,
+                turns=[pbp_turn],
+                is_interrupt=False,
+            )
+
+        # 3. Priority & Interrupt Determination
         is_interrupt = False
         if eval_data.is_blunder or eval_data.classification == MoveClassification.BRILLIANT:
             priority = CommentaryPriority.INTERRUPT.value
@@ -182,7 +128,7 @@ class CommentaryAgent:
         else:
             priority = CommentaryPriority.NORMAL.value
 
-        # 3. Fallback if API key is missing
+        # 4. Fallback if API key is missing
         if not self._client:
             fallback_turns = self._generate_fallback_turns(context, priority)
             return CommentaryExchange(
@@ -200,6 +146,7 @@ class CommentaryAgent:
         gen_config = types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
             response_mime_type="application/json",
+            response_schema=LLMCommentaryOutput,
             temperature=self.temperature,
             max_output_tokens=self.max_tokens,
         )
@@ -241,16 +188,29 @@ class CommentaryAgent:
     @staticmethod
     def _sanitize_temporal_phrasing(text: str, opponent_color: str) -> str:
         """
-        Guarantees that prospective moves for the opponent (who has not moved yet)
+        1. Strips any em-dashes ('—') or en-dashes ('–') and converts them to natural commas.
+        2. Guarantees that prospective moves for the opponent (who has not moved yet)
         use modal/conditional phrasing (e.g. 'can now play') instead of false present tense.
         """
+        # Strip em-dashes and en-dashes to enforce natural speech without em-dashes
+        text = text.replace("—", ", ").replace("–", ", ")
+        text = re.sub(r",\s*,+", ",", text)
+        text = re.sub(r"\s+", " ", text).strip()
+
         opp = opponent_color.capitalize()
-        # 'White now plays' -> 'White can now play'
+        # Clean up prospective 'now eyes' / 'eyes' repetitive crutches
+        text = re.sub(rf"\b{opp}\s+now\s+eyes\b", f"{opp} might look toward", text, flags=re.IGNORECASE)
+        text = re.sub(rf"\b{opp}\s+eyes\b", f"{opp} could consider", text, flags=re.IGNORECASE)
+
+        # Convert false present-tense claims for opponent into conditional possibilities
         text = re.sub(rf"\b{opp}\s+now\s+plays\b", f"{opp} can now play", text, flags=re.IGNORECASE)
+        text = re.sub(rf"\b{opp}\s+plays\b", f"{opp} could try", text, flags=re.IGNORECASE)
         text = re.sub(rf"\b{opp}\s+now\s+pushes\b", f"{opp} can now push", text, flags=re.IGNORECASE)
+        text = re.sub(rf"\b{opp}\s+pushes\b", f"{opp} could push", text, flags=re.IGNORECASE)
         text = re.sub(rf"\b{opp}\s+now\s+strikes\b", f"{opp} can now strike", text, flags=re.IGNORECASE)
-        # 'White plays [move]' when preceded by punctuation/semicolon
-        text = re.sub(rf"([.;,]\s*){opp}\s+plays\b", rf"\1{opp} can play", text, flags=re.IGNORECASE)
+        text = re.sub(rf"\b{opp}\s+strikes\b", f"{opp} could strike", text, flags=re.IGNORECASE)
+        text = re.sub(rf"\b{opp}\s+now\s+opts\s+for\b", f"{opp} might opt for", text, flags=re.IGNORECASE)
+        text = re.sub(rf"\b{opp}\s+opts\s+for\b", f"{opp} could opt for", text, flags=re.IGNORECASE)
         return text
 
     def _parse_llm_json(self, raw_json: str, priority: int) -> List[DialogueTurn]:
@@ -390,7 +350,7 @@ class CommentaryAgent:
                 ),
                 DialogueTurn(
                     speaker=CommentatorRole.ANALYST,
-                    text="A critical juncture in the game—taking the time to calculate the complications before making a stand.",
+                    text="A critical juncture in the game, taking the time to calculate the complications before making a stand.",
                     emotion=CommentaryEmotion.ANALYTICAL,
                     priority=priority,
                 ),

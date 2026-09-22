@@ -152,6 +152,20 @@ class ChessStateTracker:
             if bc is not None:
                 self.last_black_clock = float(bc) / 1000.0 if float(bc) > 1000 else float(bc)
 
+            # Synchronize internal board to any pre-existing moves in stream header
+            moves_str = (initial_state.get("moves") or data.get("moves") or "").strip()
+            if moves_str:
+                for uci in moves_str.split():
+                    try:
+                        m = chess.Move.from_uci(uci)
+                        if m in self.board.legal_moves:
+                            self.board.push(m)
+                            self.processed_ply += 1
+                        else:
+                            break
+                    except Exception:
+                        break
+
             return self.metadata
 
         # Clock sync packet without moves
@@ -169,6 +183,19 @@ class ChessStateTracker:
             move_list = moves_str.split() if moves_str else []
 
             if len(move_list) > self.processed_ply:
+                # Catch up internal board on any preceding unparsed moves
+                while self.processed_ply < len(move_list) - 1:
+                    preceding_uci = move_list[self.processed_ply]
+                    try:
+                        m = chess.Move.from_uci(preceding_uci)
+                        if m in self.board.legal_moves:
+                            self.board.push(m)
+                            self.processed_ply += 1
+                        else:
+                            break
+                    except Exception:
+                        break
+
                 latest_uci = move_list[-1]
                 wc, bc = self._extract_clocks(data)
                 return self.push_uci(

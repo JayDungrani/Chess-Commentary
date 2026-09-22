@@ -25,6 +25,7 @@ from app.lichess.broadcast_streamer import (
     parse_clock_seconds,
 )
 from app.engine.stockfish_pool import get_stockfish_engine, shutdown_stockfish_engine
+from app.engine.opening_book import GameOpeningTracker
 from app.services.broadcast_session import (
     BroadcastEventType,
     BroadcastFrame,
@@ -203,6 +204,7 @@ async def analyze_full_pgn_or_fen(
         snapshots[0]["visualCues"] = snapshots[0]["evaluation"]["visual_cues"]
         return metadata, snapshots
 
+    opening_tracker = GameOpeningTracker()
     prev_cp = 0
     curr_node = game
     for i, move in enumerate(moves, 1):
@@ -215,6 +217,12 @@ async def analyze_full_pgn_or_fen(
         turn_str = "white" if board.turn == chess.WHITE else "black"
         san = board.san(move)
         uci = move.uci()
+        is_book, left_book_now, eco, opening_name = opening_tracker.process_move(
+            board_before=board,
+            move=move,
+            move_san=san,
+            ply=i,
+        )
         board.push(move)
         fen_after = board.fen()
 
@@ -229,7 +237,9 @@ async def analyze_full_pgn_or_fen(
         swing = cp - prev_cp
         loss_cp = -swing if turn_str == "white" else swing
 
-        if loss_cp > 250:
+        if is_book:
+            classification = "BOOK"
+        elif loss_cp > 250:
             classification = "BLUNDER"
         elif loss_cp > 120:
             classification = "MISTAKE"
@@ -261,9 +271,9 @@ async def analyze_full_pgn_or_fen(
             "played_san": san,
             "played_uci": uci,
             "fen_after": fen_after,
-            "is_book": False,
-            "left_book_now": False,
-            "opening_name": None,
+            "is_book": is_book,
+            "left_book_now": left_book_now,
+            "opening_name": opening_name,
             "eval_cp_after": cp,
             "mate_in_after": mate,
             "eval_swing_cp": swing,

@@ -1,6 +1,7 @@
 # backend/app/commentary/director.py
 
 import logging
+import time
 from typing import List, Optional
 from collections import deque
 
@@ -49,6 +50,9 @@ class BroadcastDirector:
         self.consecutive_fast_moves: int = 0
         self.game_format: str = game_format.lower()
         self.ponder_style_index: int = 0
+        self.last_exchange_time: float = 0.0
+        self.last_exchange_duration: float = 0.0
+        self.last_exchange_dynamic: Optional[SpeakingDynamic] = None
 
     def reset(self, game_format: str = "blitz") -> None:
         """Resets commentator memory and tracking state for a new game."""
@@ -59,6 +63,9 @@ class BroadcastDirector:
         self.consecutive_fast_moves = 0
         self.game_format = game_format.lower()
         self.ponder_style_index = 0
+        self.last_exchange_time = 0.0
+        self.last_exchange_duration = 0.0
+        self.last_exchange_dynamic = None
 
     def is_format_time_trouble(self, clock_seconds: Optional[float]) -> bool:
         if clock_seconds is None:
@@ -77,20 +84,59 @@ class BroadcastDirector:
             return ThinkCategory.THINK
         return ThinkCategory.NORMAL
 
+    def is_long_audio_active(self, pending_audio_seconds: float = 0.0) -> bool:
+        """
+        Determines whether long audio commentary (banter, solo host/analyst breakdown)
+        is currently actively playing or queued.
+        """
+        if pending_audio_seconds > 0.1:
+            if self.last_exchange_dynamic and self.last_exchange_dynamic != SpeakingDynamic.PLAY_BY_PLAY:
+                return True
+            if pending_audio_seconds > 2.5:
+                return True
+            return False
+
+        if self.last_exchange_duration > 0 and self.last_exchange_dynamic:
+            elapsed = time.time() - self.last_exchange_time
+            remaining = self.last_exchange_duration - elapsed
+            if remaining > 0.1:
+                return self.last_exchange_dynamic != SpeakingDynamic.PLAY_BY_PLAY
+
+        return False
+
+    def is_play_by_play_active(self, pending_audio_seconds: float = 0.0) -> bool:
+        """
+        Determines whether play-by-play audio (crisp spoken move call) is currently active.
+        """
+        if pending_audio_seconds > 0.1:
+            if self.last_exchange_dynamic == SpeakingDynamic.PLAY_BY_PLAY:
+                return True
+            return False
+
+        if self.last_exchange_duration > 0 and self.last_exchange_dynamic == SpeakingDynamic.PLAY_BY_PLAY:
+            elapsed = time.time() - self.last_exchange_time
+            return (self.last_exchange_duration - elapsed) > 0.1
+
+        return False
+
     def determine_speaking_dynamic(
         self,
         eval_data: MoveEvaluation,
         is_time_trouble: bool,
         think_category: ThinkCategory = ThinkCategory.NORMAL,
         pending_audio_seconds: float = 0.0,
+        is_long_audio_playing: Optional[bool] = None,
+        is_play_by_play_playing: Optional[bool] = None,
     ) -> SpeakingDynamic:
         """
         Production turn-taking logic:
-        - Critical Tactical Swings (blunders, brilliancies, mistakes) trigger BANTER.
-        - Deep Thinks in Rapid/Classical trigger BANTER or SOLO_ANALYST (never silence!).
+        - Critical Tactical Swings (blunders, brilliancies) trigger BANTER (priority interrupt).
+        - If long commentary audio is currently playing when next move is played: return SILENCE.
+        - Otherwise, if play-by-play audio is going on: keep continuing speaking.
+        - Deep Thinks in Rapid/Classical trigger BANTER or SOLO_ANALYST.
         - Novelty / Time Trouble trigger SOLO_HOST.
-        - Instant moves on quiet positions allow SILENCE to let audio buffer drain.
-        - Book moves and routine developing moves balance between voices and natural pauses.
+        - Routine book recaptures and fast moves trigger PLAY_BY_PLAY.
+        - Normal and quiet moves alternate between SOLO_HOST and SOLO_ANALYST.
         """
         # Track consecutive fast moves
         if think_category == ThinkCategory.INSTANT:
@@ -104,17 +150,37 @@ class BroadcastDirector:
         else:
             self.consecutive_book_moves = 0
 
-        # 1. Critical Tactical Swings (Always two-voice BANTER)
+        # 1. Critical Tactical Swings (Always two-voice BANTER - emergency interrupt)
         if eval_data.is_blunder or eval_data.classification == MoveClassification.BRILLIANT:
             self.consecutive_silence_count = 0
             return SpeakingDynamic.BANTER
 
-        # 2. Inaccuracies and Mistakes -> Banter
-        if eval_data.classification in (MoveClassification.MISTAKE, MoveClassification.INACCURACY):
+        # Resolve whether long audio or play-by-play audio is active
+        if is_long_audio_playing is None:
+            is_long_audio = self.is_long_audio_active(pending_audio_seconds)
+        else:
+            is_long_audio = is_long_audio_playing
+
+        # 2. Long Audio Playing Guard:
+        # If long audio commentary is currently playing when the next move arrives, keep it silent
+        # so the active breakdown finishes cleanly without talking over it or stacking up.
+        # Otherwise, if it is play-by-play audio going on, keep continuing speaking.
+        if is_long_audio:
+            self.consecutive_silence_count += 1
+            return SpeakingDynamic.SILENCE
+
+        # 3. Inaccuracies and Mistakes
+        if eval_data.classification == MoveClassification.MISTAKE:
             self.consecutive_silence_count = 0
             return SpeakingDynamic.BANTER
+        elif eval_data.classification == MoveClassification.INACCURACY:
+            self.consecutive_silence_count = 0
+            if eval_data.ply <= 10 or eval_data.is_book:
+                # In the opening, minor inaccuracies are natural development choices; keep it to a single voice
+                return SpeakingDynamic.SOLO_ANALYST if self.last_speaker != CommentatorRole.ANALYST else SpeakingDynamic.SOLO_HOST
+            return SpeakingDynamic.BANTER
 
-        # 3. Deep Thinks (Player paused significantly to calculate; critical narrative moment)
+        # 4. Deep Thinks (Player paused significantly to calculate; critical narrative moment)
         if think_category == ThinkCategory.DEEP_THINK:
             self.consecutive_silence_count = 0
             # In Rapid/Blitz, single GM analyst takeaway prevents multi-turn audio backlog unless blunder/brilliant
@@ -124,55 +190,44 @@ class BroadcastDirector:
                 return SpeakingDynamic.BANTER
             return SpeakingDynamic.SOLO_ANALYST
 
-        # 4. Novelty Departure Point (Out of book)
+        # 5. Novelty Departure Point (Out of book)
         if eval_data.left_book_now:
             self.consecutive_silence_count = 0
             return SpeakingDynamic.SOLO_HOST
 
-        # 5. Time Trouble Pressure
+        # 6. Time Trouble Pressure
         if is_time_trouble:
             self.consecutive_silence_count = 0
             return SpeakingDynamic.SOLO_HOST
 
-        # 6. Audio Backpressure Guard (Format-dependent threshold)
+        # 7. Audio Backpressure Guard: Drop to crisp play-by-play rather than complete silence
         max_audio_backpressure = FORMAT_AUDIO_BACKPRESSURE_THRESHOLDS.get(self.game_format, 12.0)
         if pending_audio_seconds > max_audio_backpressure:
-            self.consecutive_silence_count += 1
-            return SpeakingDynamic.SILENCE
+            self.consecutive_silence_count = 0
+            return SpeakingDynamic.PLAY_BY_PLAY
 
-        # 7. Book Moves
+        # 8. Book Moves: 100% voiced coverage (Opening framing, GM analysis, or crisp move calls)
         if eval_data.is_book:
-            if self.consecutive_book_moves >= 2:
-                self.consecutive_book_moves = 0
-                self.consecutive_silence_count = 0
-                return SpeakingDynamic.SOLO_ANALYST
+            self.consecutive_silence_count = 0
+            # Routine opening recaptures (e.g. cxd4, Nxd4) get crisp play-by-play calls
+            if "x" in eval_data.played_san:
+                return SpeakingDynamic.PLAY_BY_PLAY
 
-            if eval_data.ply <= 4 and self.consecutive_silence_count >= 1:
-                self.consecutive_silence_count = 0
+            # First moves get immediate broadcast framing
+            if eval_data.ply <= 2:
                 return SpeakingDynamic.SOLO_HOST
+            elif self.consecutive_book_moves % 2 == 0:
+                return SpeakingDynamic.SOLO_ANALYST
+            elif think_category == ThinkCategory.INSTANT:
+                return SpeakingDynamic.PLAY_BY_PLAY
+            return SpeakingDynamic.SOLO_HOST if self.last_speaker == CommentatorRole.ANALYST else SpeakingDynamic.SOLO_ANALYST
 
-            self.consecutive_silence_count += 1
-            return SpeakingDynamic.SILENCE
-
-        # 8. Fast Moves & Instant Sequences -> PLAY_BY_PLAY or SILENCE
+        # 9. Fast Moves & Instant Sequences -> Crisp zero-latency PLAY_BY_PLAY (never silence)
         if think_category == ThinkCategory.INSTANT or self.consecutive_fast_moves >= 2:
-            if pending_audio_seconds > 4.0:
-                self.consecutive_silence_count += 1
-                return SpeakingDynamic.SILENCE
+            self.consecutive_silence_count = 0
+            return SpeakingDynamic.PLAY_BY_PLAY
 
-            if self.consecutive_silence_count == 0 and len(self.dialogue_history) >= 1:
-                self.consecutive_silence_count = 0
-                return SpeakingDynamic.PLAY_BY_PLAY
-
-            if self.consecutive_fast_moves >= 2:
-                self.consecutive_silence_count = 0
-                return SpeakingDynamic.PLAY_BY_PLAY
-
-        # 9. Normal & Quiet Moves: Natural dialogue cadence
-        if self.consecutive_silence_count == 0 and len(self.dialogue_history) >= 2:
-            self.consecutive_silence_count += 1
-            return SpeakingDynamic.SILENCE
-
+        # 10. Normal & Quiet Moves: Alternating Host and Analyst (Universal Spoken Floor)
         self.consecutive_silence_count = 0
         if self.last_speaker == CommentatorRole.ANALYST:
             return SpeakingDynamic.SOLO_HOST
@@ -187,22 +242,22 @@ class BroadcastDirector:
     ) -> str:
         """Determines the target spoken length for commentator dialogue, strictly combined."""
         if dynamic == SpeakingDynamic.PLAY_BY_PLAY:
-            return "2-5 words total (Ultra-concise play-by-play move call, e.g. 'Bishop to e6.', 'Castles.')"
+            return "2-5 words total (Ultra-concise play-by-play move call, e.g. 'Bishop to e2.', 'Castles.')"
         if was_pondered:
             return "5-10 words total (Crisp confirmation of the played move)"
         if eval_data.is_blunder or eval_data.classification == MoveClassification.BRILLIANT:
-            return "20-26 words total combined (Dramatic reaction, empathetic validation, and clear refutation)"
+            return "18-24 words total combined (Dramatic reaction and refutation)"
         if think_category == ThinkCategory.DEEP_THINK:
             if self.game_format in ("rapid", "blitz"):
-                return "15-20 words total (Crisp single-takeaway summary to maintain broadcast pacing)"
-            return "20-30 words total (In-depth strategic breakdown of the player's dilemma)"
+                return "15-20 words total (Deep think breakdown: analyze complications weighed during the long pause)"
+            return "20-28 words total (In-depth strategic breakdown of the player's dilemma)"
         if think_category == ThinkCategory.THINK:
-            return "14-20 words total"
+            return "12-16 words total (Focused strategic takeaway matching the player's calculation pause)"
         if think_category == ThinkCategory.INSTANT:
-            return "5-10 words total (Snappy, punchy reaction to the instant move)"
+            return "2-5 words total (Clean play-by-play move call)"
         if dynamic == SpeakingDynamic.BANTER:
-            return "16-22 words total combined"
-        return "12-18 words total"
+            return "14-20 words total combined"
+        return "10-15 words total"
 
     def assemble_context(
         self,
@@ -211,6 +266,8 @@ class BroadcastDirector:
         white_player: str,
         black_player: str,
         pending_audio_seconds: float = 0.0,
+        is_long_audio_playing: Optional[bool] = None,
+        is_play_by_play_playing: Optional[bool] = None,
         was_pondered: bool = False,
     ) -> CommentaryContext:
         """Constructs the fully enriched context contract ready for the LLM agent."""
@@ -225,6 +282,8 @@ class BroadcastDirector:
             is_time_trouble=time_trouble,
             think_category=think_cat,
             pending_audio_seconds=pending_audio_seconds,
+            is_long_audio_playing=is_long_audio_playing,
+            is_play_by_play_playing=is_play_by_play_playing,
         )
 
         word_range = self.determine_word_range(eval_data, dynamic, think_cat, was_pondered=was_pondered)
@@ -281,10 +340,10 @@ class BroadcastDirector:
 
         ponder_styles = [
             "TACTICAL_QUESTION: Pose a sharp, direct rhetorical question about candidate moves or threats (e.g., 'Can White get away with c5 right now, or is e4 too fast?')",
-            "STRATEGIC_TRADEOFF: Highlight positional trade-offs (e.g., 'Tough call—trading minor pieces relieves the squeeze, but concedes the d4 outpost.')",
-            "PIECE_ACTIVITY: Spotlight a key piece's struggle or mobility (e.g., 'That bishop on e2 needs breathing room—a central pawn break feels mandatory.')",
+            "STRATEGIC_TRADEOFF: Highlight positional trade-offs (e.g., 'Tough call, trading minor pieces relieves the squeeze, but concedes the d4 outpost.')",
+            "PIECE_ACTIVITY: Spotlight a key piece's struggle or mobility (e.g., 'That bishop on e2 needs breathing room, a central pawn break feels mandatory.')",
             "INSTINCT_VS_ENGINE: Contrast natural human over-the-board desire with cold engine truth (e.g., 'Human instinct screams to counterpunch, though computers favor quiet defense.')",
-            "TENSION_ATMOSPHERE: Capture the atmospheric tension and ticking clock (e.g., 'Heavy silence over the board—this next pawn move dictates the entire flow of the endgame.')",
+            "TENSION_ATMOSPHERE: Capture the atmospheric tension and ticking clock (e.g., 'Heavy silence over the board, this next pawn move dictates the entire flow of the endgame.')",
         ]
         style_hint = ponder_styles[self.ponder_style_index % len(ponder_styles)]
         self.ponder_style_index += 1
@@ -312,6 +371,13 @@ class BroadcastDirector:
 
     def record_exchange(self, exchange: CommentaryExchange) -> None:
         """Appends generated dialogue turns to the rolling history and updates speaker tracking."""
-        for turn in exchange.turns:
-            self.dialogue_history.append(turn)
-            self.last_speaker = turn.speaker
+        if exchange.dynamic != SpeakingDynamic.SILENCE and exchange.turns:
+            self.last_exchange_time = time.time()
+            self.last_exchange_dynamic = exchange.dynamic
+            self.last_exchange_duration = sum(
+                getattr(turn, "estimated_duration_seconds", 0.0) or max(1.2, len(turn.text.split()) / 2.5)
+                for turn in exchange.turns
+            )
+            for turn in exchange.turns:
+                self.dialogue_history.append(turn)
+                self.last_speaker = turn.speaker

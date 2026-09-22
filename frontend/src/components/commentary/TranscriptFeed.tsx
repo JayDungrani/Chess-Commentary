@@ -14,7 +14,7 @@ const DYNAMIC_LABEL_MAP: Record<string, string> = {
   SOLO_HOST: 'Solo Host',
   SOLO_ANALYST: 'Solo Analyst',
   BANTER: 'Studio Banter',
-  SILENCE: 'Pondering',
+  SILENCE: 'Silent Pause',
   PLAY_BY_PLAY: 'Play-by-Play',
 };
 
@@ -22,10 +22,13 @@ export const TranscriptFeed: React.FC<TranscriptFeedProps> = ({ transcript }) =>
   const { isDark } = useTheme();
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
 
+  // Filter out silent exchanges with no dialogue turns
+  const spokenExchanges = transcript.filter((ex) => ex.turns && ex.turns.length > 0);
+
   // Auto-scroll to latest dialogue line
   useEffect(() => {
     bottomAnchorRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [transcript]);
+  }, [spokenExchanges.length]);
 
   return (
     <div
@@ -50,19 +53,19 @@ export const TranscriptFeed: React.FC<TranscriptFeedProps> = ({ transcript }) =>
           </span>
         </div>
         <span className="text-[11px] font-mono text-neutral-500">
-          {transcript.length} turns
+          {spokenExchanges.length} spoken
         </span>
       </div>
 
       {/* Transcript Scroll Area */}
       <div className="flex-1 p-3 overflow-y-auto space-y-3.5 min-h-0">
-        {transcript.length === 0 ? (
+        {spokenExchanges.length === 0 ? (
           <div className="h-32 flex flex-col items-center justify-center text-neutral-500 text-xs gap-1.5">
             <Volume2 className="w-5 h-5 opacity-40" />
             <span>Awaiting broadcast commentary...</span>
           </div>
         ) : (
-          transcript.map((exchange, exIdx) => {
+          spokenExchanges.map((exchange, exIdx) => {
             const movePrefix = exchange.ply
               ? `${Math.floor((exchange.ply + 1) / 2)}${
                   exchange.turn_color === 'white' ? '.' : '...'

@@ -811,6 +811,8 @@ class BroadcastSession:
 
             evaluation = await self.analyzer.evaluate_move(parsed_event)
             pending_audio = self.tts_service.pending_audio_seconds if self.tts_service else 0.0
+            is_long = self.tts_service.is_long_audio_playing if self.tts_service else None
+            is_pbp = self.tts_service.is_play_by_play_audio_playing if self.tts_service else None
 
             context = self.director.assemble_context(
                 eval_data=evaluation,
@@ -818,6 +820,8 @@ class BroadcastSession:
                 white_player=w_name,
                 black_player=b_name,
                 pending_audio_seconds=pending_audio,
+                is_long_audio_playing=is_long,
+                is_play_by_play_playing=is_pbp,
                 was_pondered=False,
             )
             exchange = await self.agent.generate_commentary(context)
@@ -879,6 +883,10 @@ class BroadcastSession:
             return
 
         target_start_ply = 0
+        white_name = "White"
+        black_name = "Black"
+        game_speed = "classical" if self.round_id else "blitz"
+
         if not self.replay_all:
             init_check = await self._inspect_initial_game()
 
@@ -923,9 +931,77 @@ class BroadcastSession:
                 )
                 return
 
-            if init_check and init_check.current_ply > 0:
+            if init_check and init_check.current_ply > 0 and init_check.initial_moves:
                 target_start_ply = init_check.current_ply
-                print(f"{C_DIM}>>> Detected live match at Ply {target_start_ply}. Catching up...{C_RESET}")
+                white_name = init_check.metadata.white_player.username
+                black_name = init_check.metadata.black_player.username
+                game_speed = init_check.metadata.speed or game_speed
+
+                self.analyzer.reset()
+                self.director.reset(game_format=game_speed)
+
+                yield BroadcastFrame(
+                    event_type=BroadcastEventType.METADATA,
+                    game_id=self.game_id,
+                    round_id=self.round_id,
+                    fen=chess.STARTING_FEN,
+                    metadata=init_check.metadata,
+                )
+
+                print(f"{C_DIM}>>> [SYNC] Calculating engine evaluations for Plies 1 to {target_start_ply - 1}...{C_RESET}")
+                # 1. Evaluate historical moves with engine (NO commentary/audio backlog)
+                for mv in init_check.initial_moves[:-1]:
+                    evaluation = await self.analyzer.evaluate_move(mv)
+                    yield BroadcastFrame(
+                        event_type=BroadcastEventType.MOVE,
+                        game_id=self.game_id,
+                        round_id=self.round_id,
+                        ply=mv.ply,
+                        fen=mv.fen,
+                        turn=mv.turn,
+                        move=mv,
+                        evaluation=evaluation,
+                        visual_cues=evaluation.visual_cues if evaluation else None,
+                    )
+
+                # 2. Evaluate latest move with engine AND generate live commentary
+                latest_mv = init_check.initial_moves[-1]
+                print(f"{C_DIM}>>> [SYNC] Evaluating & generating commentary for live Ply {latest_mv.ply} ({latest_mv.san})...{C_RESET}")
+                latest_evaluation = await self.analyzer.evaluate_move(latest_mv)
+                pending_audio = self.tts_service.pending_audio_seconds if self.tts_service else 0.0
+                is_long = self.tts_service.is_long_audio_playing if self.tts_service else None
+                is_pbp = self.tts_service.is_play_by_play_audio_playing if self.tts_service else None
+
+                context = self.director.assemble_context(
+                    eval_data=latest_evaluation,
+                    event=latest_mv,
+                    white_player=white_name,
+                    black_player=black_name,
+                    pending_audio_seconds=pending_audio,
+                    is_long_audio_playing=is_long,
+                    is_play_by_play_playing=is_pbp,
+                    was_pondered=False,
+                )
+                exchange = await self.agent.generate_commentary(context)
+                if self.tts_service and self.enable_tts:
+                    exchange = await self.tts_service.synthesize_exchange(
+                        exchange=exchange,
+                        game_id=self.game_id,
+                    )
+                self.director.record_exchange(exchange)
+
+                yield BroadcastFrame(
+                    event_type=BroadcastEventType.MOVE,
+                    game_id=self.game_id,
+                    round_id=self.round_id,
+                    ply=latest_mv.ply,
+                    fen=latest_mv.fen,
+                    turn=latest_mv.turn,
+                    move=latest_mv,
+                    evaluation=latest_evaluation,
+                    commentary=exchange,
+                    visual_cues=latest_evaluation.visual_cues if latest_evaluation else None,
+                )
 
         if self.round_id:
             raw_streamer = LichessBroadcastStreamer(
@@ -945,9 +1021,6 @@ class BroadcastSession:
         is_broadcast_game = bool(self.round_id)
         max_delay = 0.0 if is_broadcast_game else settings.max_paced_move_delay_seconds
 
-        white_name = "White"
-        black_name = "Black"
-        game_speed = "classical" if self.round_id else "blitz"
         game_concluded = False
         self._last_move_pondered = False
 
@@ -975,18 +1048,19 @@ class BroadcastSession:
                     black_name = event.black_player.username
                     game_speed = event.speed or game_speed
 
-                    self.analyzer.reset()
-                    self.director.reset(game_format=game_speed)
+                    if target_start_ply == 0:
+                        self.analyzer.reset()
+                        self.director.reset(game_format=game_speed)
+                        yield BroadcastFrame(
+                            event_type=BroadcastEventType.METADATA,
+                            game_id=self.game_id,
+                            round_id=self.round_id,
+                            fen=chess.STARTING_FEN,
+                            metadata=event,
+                        )
+
                     if not is_broadcast_game and hasattr(self.paced_streamer, "set_game_format"):
                         self.paced_streamer.set_game_format(game_speed)
-
-                    yield BroadcastFrame(
-                        event_type=BroadcastEventType.METADATA,
-                        game_id=self.game_id,
-                        round_id=self.round_id,
-                        fen=chess.STARTING_FEN,
-                        metadata=event,
-                    )
                     continue
 
                 elif is_pondering:
@@ -1008,7 +1082,7 @@ class BroadcastSession:
                     context = self.director.assemble_pondering_context(
                         ply=event.ply,
                         turn=event.turn,
-                        acting_player=event.acting_player,
+                        acting_player=event.acting_player or ("White" if event.turn == "white" else "Black"),
                         fen=event.fen or self.analyzer.board.fen(),
                         elapsed_think_seconds=event.elapsed_think_seconds,
                         candidate_suggestions=candidate_suggestions,
@@ -1019,25 +1093,24 @@ class BroadcastSession:
                     )
 
                     exchange = await self.agent.generate_commentary(context)
+                    if exchange.dynamic != SpeakingDynamic.SILENCE and exchange.turns:
+                        self._last_move_pondered = True
+                        if self.tts_service and self.enable_tts:
+                            exchange = await self.tts_service.synthesize_exchange(
+                                exchange=exchange,
+                                game_id=self.game_id,
+                            )
+                        self.director.record_exchange(exchange)
 
-                    if self.tts_service and self.enable_tts:
-                        exchange = await self.tts_service.synthesize_exchange(
-                            exchange=exchange,
+                        yield BroadcastFrame(
+                            event_type=BroadcastEventType.PONDERING,
                             game_id=self.game_id,
+                            round_id=self.round_id,
+                            ply=event.ply,
+                            fen=event.fen or self.analyzer.board.fen(),
+                            turn=event.turn,
+                            commentary=exchange,
                         )
-
-                    self.director.record_exchange(exchange)
-                    self._last_move_pondered = True
-
-                    yield BroadcastFrame(
-                        event_type=BroadcastEventType.PONDERING,
-                        game_id=self.game_id,
-                        round_id=self.round_id,
-                        ply=event.ply,
-                        fen=event.fen or self.analyzer.board.fen(),
-                        turn=event.turn,
-                        commentary=exchange,
-                    )
                     continue
 
                 elif is_termination:
@@ -1063,69 +1136,21 @@ class BroadcastSession:
                     break
 
                 elif is_move:
+                    # Skip historical moves that were already evaluated during initial sync
+                    if target_start_ply > 0 and event.ply <= target_start_ply:
+                        continue
+
                     if event.turn == "white" and event.acting_player:
                         white_name = event.acting_player
                     elif event.turn == "black" and event.acting_player:
                         black_name = event.acting_player
 
-                    if target_start_ply > 1 and event.ply < (target_start_ply - 1):
-                        current_move = chess.Move.from_uci(event.uci)
-                        self.analyzer.opening_tracker.process_move(
-                            board_before=self.analyzer.board.copy(),
-                            move=current_move,
-                            move_san=event.san,
-                            ply=event.ply,
-                        )
-                        if current_move in self.analyzer.board.legal_moves:
-                            self.analyzer.board.push(current_move)
-                        else:
-                            self.analyzer.board.set_fen(event.fen)
-
-                        print(f"\r{C_DIM}>>> [SYNC] Fast-syncing: {event.san:<6} (Ply {event.ply}/{target_start_ply})...{C_RESET}", end="", flush=True)
-
-                        yield BroadcastFrame(
-                            event_type=BroadcastEventType.MOVE,
-                            game_id=self.game_id,
-                            round_id=self.round_id,
-                            ply=event.ply,
-                            fen=event.fen,
-                            turn=event.turn,
-                            move=event,
-                        )
-                        continue
-
-                    elif target_start_ply > 1 and event.ply == (target_start_ply - 1):
-                        current_move = chess.Move.from_uci(event.uci)
-                        self.analyzer.opening_tracker.process_move(
-                            board_before=self.analyzer.board.copy(),
-                            move=current_move,
-                            move_san=event.san,
-                            ply=event.ply,
-                        )
-                        if current_move in self.analyzer.board.legal_moves:
-                            self.analyzer.board.push(current_move)
-                        else:
-                            self.analyzer.board.set_fen(event.fen)
-
-                        print(f"\r{C_DIM}>>> [SYNC] Priming engine baseline on Ply {event.ply}...{C_RESET}", end="", flush=True)
-                        self.analyzer.previous_analysis = await self.analyzer.engine.analyze_position(event.fen)
-                        self.analyzer.previous_move = current_move
-
-                        yield BroadcastFrame(
-                            event_type=BroadcastEventType.MOVE,
-                            game_id=self.game_id,
-                            round_id=self.round_id,
-                            ply=event.ply,
-                            fen=event.fen,
-                            turn=event.turn,
-                            move=event,
-                        )
-                        continue
-
                     print(f"\r" + " " * 75 + "\r", end="", flush=True)
 
                     evaluation = await self.analyzer.evaluate_move(event)
                     pending_audio = self.tts_service.pending_audio_seconds if self.tts_service else 0.0
+                    is_long = self.tts_service.is_long_audio_playing if self.tts_service else None
+                    is_pbp = self.tts_service.is_play_by_play_audio_playing if self.tts_service else None
 
                     context = self.director.assemble_context(
                         eval_data=evaluation,
@@ -1133,6 +1158,8 @@ class BroadcastSession:
                         white_player=white_name,
                         black_player=black_name,
                         pending_audio_seconds=pending_audio,
+                        is_long_audio_playing=is_long,
+                        is_play_by_play_playing=is_pbp,
                         was_pondered=self._last_move_pondered,
                     )
                     self._last_move_pondered = False

@@ -177,7 +177,9 @@ export function useBroadcastStream({
 
             if (frame.commentary) {
               setLatestCommentary(frame.commentary);
-              setTranscript((prev) => [...prev, frame.commentary!]);
+              if (frame.commentary.turns && frame.commentary.turns.length > 0) {
+                setTranscript((prev) => [...prev, frame.commentary!]);
+              }
 
               // Queue audio turns sequentially for broadcast playback
               if (autoPlayAudioRef.current && ttsRef.current && frame.commentary.turns.length > 0) {
@@ -190,7 +192,9 @@ export function useBroadcastStream({
           case 'PONDERING': {
             if (frame.commentary) {
               setLatestCommentary(frame.commentary);
-              setTranscript((prev) => [...prev, frame.commentary!]);
+              if (frame.commentary.turns && frame.commentary.turns.length > 0) {
+                setTranscript((prev) => [...prev, frame.commentary!]);
+              }
               if (autoPlayAudioRef.current && ttsRef.current && frame.commentary.turns.length > 0) {
                 radioEngine.enqueueTurns(frame.commentary.turns);
               }

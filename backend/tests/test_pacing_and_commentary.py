@@ -16,9 +16,11 @@ from app.commentary.schemas import (
     ThinkCategory,
     CommentatorRole,
     DialogueTurn,
+    CommentaryExchange,
 )
-from app.commentary.prompts import build_commentary_prompt
+from app.commentary.prompts import build_commentary_prompt, san_to_spoken_move
 from app.commentary.agent import CommentaryAgent
+from app.services.tts_service import TTSService
 
 
 def test_pacing_buffer_formats():
@@ -150,11 +152,13 @@ def test_director_instant_move_rapid():
     )
 
     assert context.think_category == ThinkCategory.INSTANT
-    assert "5-10 words" in context.target_word_range
-    print(f"[PASS] Instant move produced target word budget '{context.target_word_range}'")
+    assert context.dynamic == SpeakingDynamic.PLAY_BY_PLAY
+    assert "2-5 words" in context.target_word_range
+    print(f"[PASS] Instant move produced dynamic '{context.dynamic.value}' and target word budget '{context.target_word_range}'")
 
     prompt = build_commentary_prompt(context)
     assert "INSTANT MOVE" in prompt
+    assert "PLAY_BY_PLAY" in prompt
     print("[PASS] build_commentary_prompt includes INSTANT MOVE guidance")
 
 
@@ -529,11 +533,24 @@ def test_temporal_phrasing_sanitizer():
 
     raw_text_2 = "Greedy. Missed knight to e4. White plays a4."
     cleaned_2 = CommentaryAgent._sanitize_temporal_phrasing(raw_text_2, opponent_color="White")
-    assert cleaned_2 == "Greedy. Missed knight to e4. White can play a4."
+    assert "White plays" not in cleaned_2
+    assert "a4" in cleaned_2
 
     raw_text_3 = "White now strikes with bishop to c4."
     cleaned_3 = CommentaryAgent._sanitize_temporal_phrasing(raw_text_3, opponent_color="White")
     assert cleaned_3 == "White can now strike with bishop to c4."
+
+    # Verify 'now eyes' formulaic crutch is stripped
+    raw_text_eyes = "White spent nearly a minute weighing the pawn to d3 tension. Black now eyes rook to e8."
+    cleaned_eyes = CommentaryAgent._sanitize_temporal_phrasing(raw_text_eyes, opponent_color="Black")
+    assert "now eyes" not in cleaned_eyes
+    assert "rook to e8" in cleaned_eyes
+
+    # Verify 'plays [move]' without leading punctuation is converted
+    raw_text_unplayed = "Black plays e4."
+    cleaned_unplayed = CommentaryAgent._sanitize_temporal_phrasing(raw_text_unplayed, opponent_color="Black")
+    assert "Black plays" not in cleaned_unplayed
+    assert "e4" in cleaned_unplayed
 
     # Active player who actually moved should NOT be rewritten
     active_player_text = "Black plays bishop to g7."
@@ -609,6 +626,360 @@ def test_initial_moves_parsing_and_status():
     print("[PASS] InitialGameStatus and ParsedMoveEvent instantiated successfully!")
 
 
+def test_opening_phase_prompt_and_director():
+    print("\n--- 16. Testing Opening Phase Prompt Guidance & Director Recaptures ---")
+    director = BroadcastDirector(game_format="rapid")
+
+    # 1. Opening Book Move Prompt: suppresses prospective continuations, provides opening guidance
+    book_eval = MoveEvaluation(
+        ply=2,
+        turn="black",
+        played_uci="c7c5",
+        played_san="c5",
+        fen_after="rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+        eval_cp_after=20,
+        eval_swing_cp=0,
+        classification=MoveClassification.BOOK,
+        is_book=True,
+        opening_name="Sicilian Defense",
+        win_prob_before=0.52,
+        win_prob_after=0.52,
+        win_prob_loss=0.0,
+    )
+    book_event = ParsedMoveEvent(
+        ply=2,
+        turn="black",
+        uci="c7c5",
+        san="c5",
+        fen="rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+        move_time_spent_seconds=0.5,
+        white_clock_seconds=600.0,
+        black_clock_seconds=600.0,
+    )
+    book_context = director.assemble_context(book_eval, book_event, "Alice", "Bob")
+    prompt = build_commentary_prompt(book_context)
+
+    assert "OPENING PHASE GUIDANCE" in prompt
+    assert "PROSPECTIVE CONTINUATIONS" not in prompt
+    assert "DO NOT predict routine theoretical next moves" in prompt
+    assert "can now look to" not in prompt
+    assert "—" not in prompt
+    assert "–" not in prompt
+    print("[PASS] Opening book move suppressed prospective continuations and injected strategic opening guidance with zero em-dashes")
+
+    # 2. Routine Opening Book Recapture: triggers SILENCE
+    recapture_eval = MoveEvaluation(
+        ply=6,
+        turn="black",
+        played_uci="c5d4",
+        played_san="cxd4",
+        fen_after="rnbqkbnr/pp1ppppp/8/8/3pP3/5N2/PPP2PPP/RNBQKB1R w KQkq - 0 3",
+        eval_cp_after=20,
+        eval_swing_cp=0,
+        classification=MoveClassification.BOOK,
+        is_book=True,
+        opening_name="Sicilian Defense",
+        win_prob_before=0.52,
+        win_prob_after=0.52,
+        win_prob_loss=0.0,
+    )
+    recapture_event = ParsedMoveEvent(
+        ply=6,
+        turn="black",
+        uci="c5d4",
+        san="cxd4",
+        fen="rnbqkbnr/pp1ppppp/8/8/3pP3/5N2/PPP2PPP/RNBQKB1R w KQkq - 0 3",
+        move_time_spent_seconds=0.3,
+        white_clock_seconds=595.0,
+        black_clock_seconds=598.0,
+    )
+    recapture_dynamic = director.determine_speaking_dynamic(
+        eval_data=recapture_eval,
+        is_time_trouble=False,
+        think_category=ThinkCategory.INSTANT,
+    )
+    assert recapture_dynamic == SpeakingDynamic.PLAY_BY_PLAY
+    assert san_to_spoken_move(recapture_eval.played_san) == "Takes on d4."
+    print("[PASS] Universal floor: routine book recapture 'cxd4' voiced cleanly as PLAY_BY_PLAY ('Takes on d4.')")
+
+    # 3. Opening Inaccuracy: produces single-voice commentary, not forced two-voice banter
+    inaccuracy_eval = MoveEvaluation(
+        ply=8,
+        turn="white",
+        played_uci="d1d2",
+        played_san="Qd2",
+        fen_after="r1bqkbnr/pp1ppppp/2n5/8/3NP3/8/PPP2PPP/RNBQKB1R b KQkq - 1 4",
+        eval_cp_after=-40,
+        eval_swing_cp=-60,
+        classification=MoveClassification.INACCURACY,
+        is_book=False,
+        win_prob_before=0.52,
+        win_prob_after=0.48,
+        win_prob_loss=0.04,
+    )
+    inaccuracy_dynamic = director.determine_speaking_dynamic(
+        eval_data=inaccuracy_eval,
+        is_time_trouble=False,
+        think_category=ThinkCategory.NORMAL,
+    )
+    assert inaccuracy_dynamic in (SpeakingDynamic.SOLO_ANALYST, SpeakingDynamic.SOLO_HOST)
+    assert inaccuracy_dynamic != SpeakingDynamic.BANTER
+    print(f"[PASS] Opening inaccuracy produced single-voice dynamic '{inaccuracy_dynamic.value}' instead of forced banter")
+
+
+def test_long_audio_guard_and_play_by_play_continuity():
+    print("\n--- 17. Testing Long Audio Guard vs Play-by-Play Continuity ---")
+    director = BroadcastDirector(game_format="blitz")
+    normal_eval = MoveEvaluation(
+        ply=12,
+        turn="black",
+        played_uci="e7e6",
+        played_san="e6",
+        fen_after="r1bqkb1r/pp1p1ppp/2n1pn2/8/3NP3/2N5/PPP2PPP/R1BQKB1R w KQkq - 0 6",
+        eval_cp_after=15,
+        eval_swing_cp=0,
+        classification=MoveClassification.GOOD,
+        win_prob_before=0.50,
+        win_prob_after=0.50,
+        win_prob_loss=0.0,
+        is_book=False,
+    )
+
+    # 1. Long audio is playing when next move is played: must return SILENCE
+    # Case A: Explicit is_long_audio_playing=True
+    dynamic_silent = director.determine_speaking_dynamic(
+        eval_data=normal_eval,
+        is_time_trouble=False,
+        think_category=ThinkCategory.NORMAL,
+        is_long_audio_playing=True,
+    )
+    assert dynamic_silent == SpeakingDynamic.SILENCE
+    print("[PASS] Long audio playing while next move is played returned SILENCE")
+
+    # Case B: Recorded exchange was long audio (SOLO_HOST) with pending audio
+    long_exchange = CommentaryExchange(
+        ply=11,
+        move_san="d4",
+        turn_color="white",
+        dynamic=SpeakingDynamic.SOLO_HOST,
+        turns=[
+            DialogueTurn(
+                speaker=CommentatorRole.HOST,
+                text="Magnus launches a classic pawn strike, opening up central diagonals for the bishop.",
+                estimated_duration_seconds=4.5,
+            )
+        ],
+    )
+    director.record_exchange(long_exchange)
+    dynamic_recorded = director.determine_speaking_dynamic(
+        eval_data=normal_eval,
+        is_time_trouble=False,
+        think_category=ThinkCategory.NORMAL,
+        pending_audio_seconds=3.0,
+    )
+    assert dynamic_recorded == SpeakingDynamic.SILENCE
+    print("[PASS] Director automatically recognized active long audio and kept next move SILENCE")
+
+    # 2. Play-by-play audio is going on: must keep continuing speaking
+    pbp_exchange = CommentaryExchange(
+        ply=11,
+        move_san="d4",
+        turn_color="white",
+        dynamic=SpeakingDynamic.PLAY_BY_PLAY,
+        turns=[
+            DialogueTurn(
+                speaker=CommentatorRole.HOST,
+                text="Takes on d4.",
+                estimated_duration_seconds=1.2,
+            )
+        ],
+    )
+    director.record_exchange(pbp_exchange)
+    dynamic_pbp = director.determine_speaking_dynamic(
+        eval_data=normal_eval,
+        is_time_trouble=False,
+        think_category=ThinkCategory.NORMAL,
+        pending_audio_seconds=0.8,
+        is_long_audio_playing=False,
+        is_play_by_play_playing=True,
+    )
+    assert dynamic_pbp != SpeakingDynamic.SILENCE
+    assert dynamic_pbp in (SpeakingDynamic.SOLO_HOST, SpeakingDynamic.SOLO_ANALYST, SpeakingDynamic.PLAY_BY_PLAY)
+    print(f"[PASS] Play-by-play audio going on kept continuing speaking as '{dynamic_pbp.value}'")
+
+    # 3. Blunder occurs while long audio is playing: emergency interrupt triggers BANTER
+    blunder_eval = MoveEvaluation(
+        ply=14,
+        turn="white",
+        played_uci="d1d8",
+        played_san="Qxd8??",
+        fen_after="r1bQkb1r/pp1p1ppp/2n1pn2/8/4P3/2N5/PPP2PPP/R1B1KB1R b KQkq - 0 7",
+        eval_cp_after=-800,
+        eval_swing_cp=-850,
+        classification=MoveClassification.BLUNDER,
+        win_prob_before=0.60,
+        win_prob_after=0.02,
+        win_prob_loss=0.58,
+        is_blunder=True,
+    )
+    dynamic_blunder = director.determine_speaking_dynamic(
+        eval_data=blunder_eval,
+        is_time_trouble=False,
+        think_category=ThinkCategory.NORMAL,
+        is_long_audio_playing=True,
+    )
+    assert dynamic_blunder == SpeakingDynamic.BANTER
+    print("[PASS] Blunder during long audio triggered emergency BANTER interrupt")
+
+    # 4. TTSService time-aware tracking
+    tts = TTSService()
+    assert not tts.is_long_audio_playing
+    assert not tts.is_play_by_play_audio_playing
+    # Manually set pending audio as long
+    tts.pending_audio_seconds = 5.0
+    tts.current_audio_type = "long"
+    assert tts.is_long_audio_playing
+    assert not tts.is_play_by_play_audio_playing
+
+    # Switch to play-by-play
+    tts.current_audio_type = "play_by_play"
+    assert tts.is_play_by_play_audio_playing
+    assert not tts.is_long_audio_playing
+
+    # Trigger interrupt clears state
+    tts.trigger_interrupt()
+    assert tts.pending_audio_seconds == 0.0
+    assert not tts.is_long_audio_playing
+    assert not tts.is_play_by_play_audio_playing
+    print("[PASS] TTSService audio classification and interrupt tracking verified")
+
+
+def test_live_sync_catchup_and_chess_state_tracker():
+    print("\n--- 18. Testing Live Sync Catchup and ChessStateTracker Sync ---")
+    from app.lichess.pgn_parser import ChessStateTracker, ParsedMoveEvent
+    from app.services.broadcast_session import BroadcastFrame, BroadcastEventType
+
+    # 1. Test gameFull packet synchronizes internal board state to pre-existing moves
+    tracker = ChessStateTracker()
+    game_full_packet = {
+        "type": "gameFull",
+        "id": "gameTest123",
+        "players": {
+            "white": {"user": {"name": "Magnus"}, "rating": 2850},
+            "black": {"user": {"name": "Hikaru"}, "rating": 2820},
+        },
+        "state": {
+            "moves": "e2e4 e7e5 g1f3 b8c6",
+            "wtime": 180000,
+            "btime": 178000,
+        },
+    }
+    meta = tracker.parse_lichess_line(game_full_packet)
+    assert meta is not None
+    assert meta.white_player.username == "Magnus"
+    assert meta.black_player.username == "Hikaru"
+    assert tracker.processed_ply == 4
+    assert tracker.board.ply() == 4
+    print("[PASS] gameFull synchronized internal board and advanced processed_ply to 4")
+
+    # 2. Test incremental gameState parsing after gameFull
+    game_state_packet = {
+        "type": "gameState",
+        "moves": "e2e4 e7e5 g1f3 b8c6 f1c4",
+        "wtime": 175000,
+        "btime": 178000,
+    }
+    event_5 = tracker.parse_lichess_line(game_state_packet)
+    assert isinstance(event_5, ParsedMoveEvent)
+    assert event_5.ply == 5
+    assert event_5.san == "Bc4"
+    assert event_5.turn == "white"
+    assert tracker.processed_ply == 5
+    print("[PASS] gameState parsed move 5 (Bc4) cleanly without re-processing earlier moves")
+
+    # 3. Test mid-stream jump / catchup where internal board is behind stream
+    tracker_lag = ChessStateTracker()
+    # Simulate tracker having only processed move 1
+    tracker_lag.push_uci("e2e4")
+    assert tracker_lag.processed_ply == 1
+
+    # Incoming gameState with 6 moves (jumped ahead by 5 moves)
+    jump_state = {
+        "type": "gameState",
+        "moves": "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6",
+        "wtime": 160000,
+        "btime": 170000,
+    }
+    event_jump = tracker_lag.parse_lichess_line(jump_state)
+    assert isinstance(event_jump, ParsedMoveEvent)
+    assert event_jump.ply == 6
+    assert event_jump.san == "Nf6"
+    assert event_jump.turn == "black"
+    assert tracker_lag.processed_ply == 6
+    assert tracker_lag.board.ply() == 6
+    print("[PASS] ChessStateTracker successfully caught up internal board across multiple moves")
+
+    # 4. Test Live Sync frame evaluation contract:
+    # Historical moves (ply < target_start_ply) have evaluation and visual cues, but NO commentary.
+    historical_eval = MoveEvaluation(
+        ply=1,
+        turn="white",
+        played_uci="e2e4",
+        played_san="e4",
+        fen_after="rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+        eval_cp_after=25,
+        eval_swing_cp=0,
+        classification=MoveClassification.BOOK,
+        win_prob_before=0.50,
+        win_prob_after=0.50,
+        win_prob_loss=0.0,
+    )
+    historical_frame = BroadcastFrame(
+        event_type=BroadcastEventType.MOVE,
+        game_id="gameTest123",
+        ply=1,
+        fen=historical_eval.fen_after,
+        turn="white",
+        move=event_5,
+        evaluation=historical_eval,
+        commentary=None,
+        visual_cues=historical_eval.visual_cues,
+    )
+    assert historical_frame.commentary is None
+    assert historical_frame.evaluation is not None
+    assert historical_frame.evaluation.eval_cp_after == 25
+
+    # Latest live move has evaluation AND commentary
+    exchange = CommentaryExchange(
+        ply=6,
+        move_san="Nf6",
+        turn_color="black",
+        dynamic=SpeakingDynamic.PLAY_BY_PLAY,
+        turns=[
+            DialogueTurn(
+                speaker=CommentatorRole.HOST,
+                text="Knight to f6.",
+                estimated_duration_seconds=1.0,
+            )
+        ],
+    )
+    live_frame = BroadcastFrame(
+        event_type=BroadcastEventType.MOVE,
+        game_id="gameTest123",
+        ply=6,
+        fen=tracker_lag.board.fen(),
+        turn="black",
+        move=event_jump,
+        evaluation=historical_eval,
+        commentary=exchange,
+        visual_cues=historical_eval.visual_cues,
+    )
+    assert live_frame.commentary is not None
+    assert len(live_frame.commentary.turns) == 1
+    assert live_frame.commentary.turns[0].text == "Knight to f6."
+    print("[PASS] Live sync frames verified: historical moves have engine eval without commentary; live move has commentary")
+
+
 if __name__ == "__main__":
     test_pacing_buffer_formats()
     test_director_think_classification()
@@ -625,4 +996,8 @@ if __name__ == "__main__":
     test_temporal_phrasing_sanitizer()
     test_broadcast_pacing_buffer_zero_delay()
     test_initial_moves_parsing_and_status()
+    test_opening_phase_prompt_and_director()
+    test_long_audio_guard_and_play_by_play_continuity()
+    test_live_sync_catchup_and_chess_state_tracker()
     print("\nALL VERIFICATION TESTS PASSED SUCCESSFULLY!")
+

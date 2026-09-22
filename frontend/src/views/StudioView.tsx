@@ -564,11 +564,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
       </header>
 
       {/* 2. Main Studio Grid */}
-      <main className="flex-1 min-h-0 py-2 px-3 lg:px-6 max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-center">
-        {/* Left Column: Chessboard, Clocks, Eval Bar & Move Navigator */}
-        <div className="lg:col-span-7 h-full min-h-0 flex flex-col items-center justify-between max-w-[540px] mx-auto w-full py-1">
+      <main className="flex-1 min-h-0 py-2 px-3 lg:px-6 max-w-screen-2xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-center">
+        {/* Left Column: Dedicated Large Chessboard & Player Clocks */}
+        <div className="lg:col-span-7 h-full min-h-0 flex flex-col items-center justify-between w-full py-1">
           {/* Top Player (Black by default) */}
-          <div className="w-full shrink-0">
+          <div className="w-full max-w-[min(100%,calc(100vh-185px))] shrink-0">
             <PlayerCard
               player={boardOrientation === 'white' ? effectiveMetadata?.black_player : effectiveMetadata?.white_player}
               color={topColor}
@@ -584,7 +584,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           </div>
 
           {/* Board & Eval Bar Row */}
-          <div className="flex-1 min-h-0 w-full flex items-center justify-center gap-3 my-1">
+          <div className="flex-1 min-h-0 w-full flex items-center justify-center gap-3 my-1.5">
             {/* Real-time Advantage Bar */}
             <div className="shrink-0 flex items-center">
               <EvalBar
@@ -594,8 +594,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
               />
             </div>
 
-            {/* Interactive SVG Chessboard Container */}
-            <div className="h-full aspect-square max-h-[calc(100vh-275px)] max-w-[min(100%,calc(100vh-275px))] flex items-center justify-center">
+            {/* Interactive SVG Chessboard Container - Expanded to Maximize Viewport Area */}
+            <div className="h-full aspect-square max-h-[calc(100vh-190px)] max-w-[min(100%,calc(100vh-190px))] flex items-center justify-center">
               <ChessStudioBoard
                 fen={displayedFen}
                 boardOrientation={boardOrientation}
@@ -609,8 +609,27 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </div>
           </div>
 
-          {/* Move History Navigation Bar */}
-          <div className="w-full shrink-0 my-1">
+          {/* Bottom Player (White by default) */}
+          <div className="w-full max-w-[min(100%,calc(100vh-185px))] shrink-0">
+            <PlayerCard
+              player={boardOrientation === 'white' ? effectiveMetadata?.white_player : effectiveMetadata?.black_player}
+              color={bottomColor}
+              clockSeconds={bottomColor === 'white' ? whiteClock : blackClock}
+              isActiveTurn={isColorTurn(bottomColor)}
+              isTimeTrouble={bottomColor === 'white' ? isWhiteTimeTrouble : isBlackTimeTrouble}
+              lastMoveTimeSpent={
+                displayedMove?.turn === bottomColor
+                  ? displayedMove.move_time_spent_seconds
+                  : null
+              }
+            />
+          </div>
+        </div>
+
+        {/* Right Column: Analysis Hub & Commentary Desk */}
+        <div className="lg:col-span-5 h-full max-h-[calc(100vh-130px)] w-full min-h-0 flex flex-col justify-between py-1 gap-2.5">
+          {/* 1. Move History Navigation Bar */}
+          <div className="w-full shrink-0">
             <MoveNavigator
               currentPly={displayedPly}
               maxPly={latestPly}
@@ -630,8 +649,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
             />
           </div>
 
-          {/* Interactive Eval Timeline Chart */}
-          <div className="w-full shrink-0 my-1">
+          {/* 2. Interactive Eval Timeline Chart */}
+          <div className="w-full shrink-0">
             <EvalTimelineChart
               history={history}
               currentPly={displayedPly}
@@ -639,32 +658,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
             />
           </div>
 
-          {/* Bottom Player (White by default) */}
-          <div className="w-full shrink-0">
-            <PlayerCard
-              player={boardOrientation === 'white' ? effectiveMetadata?.white_player : effectiveMetadata?.black_player}
-              color={bottomColor}
-              clockSeconds={bottomColor === 'white' ? whiteClock : blackClock}
-              isActiveTurn={isColorTurn(bottomColor)}
-              isTimeTrouble={bottomColor === 'white' ? isWhiteTimeTrouble : isBlackTimeTrouble}
-              lastMoveTimeSpent={
-                displayedMove?.turn === bottomColor
-                  ? displayedMove.move_time_spent_seconds
-                  : null
-              }
+          {/* 3. Commentary Desk & Live Transcript */}
+          <div className="flex-1 min-h-0 w-full flex flex-col overflow-hidden">
+            <CommentaryStudio
+              latestCommentary={latestCommentary}
+              transcript={transcript}
+              activeSpeaker={activeSpeaker}
+              currentTurn={currentTurn}
+              isSpeaking={isSpeaking}
             />
           </div>
-        </div>
-
-        {/* Right Column: Commentary Desk & Transcript */}
-        <div className="lg:col-span-5 h-full max-h-[calc(100vh-140px)] w-full min-h-0 flex flex-col py-1">
-          <CommentaryStudio
-            latestCommentary={latestCommentary}
-            transcript={transcript}
-            activeSpeaker={activeSpeaker}
-            currentTurn={currentTurn}
-            isSpeaking={isSpeaking}
-          />
         </div>
       </main>
 

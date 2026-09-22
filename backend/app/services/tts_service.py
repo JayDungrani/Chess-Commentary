@@ -90,7 +90,9 @@ class TTSService:
         self.cleanup_old_audio()
 
         # Backpressure & lifecycle tracking
-        self.pending_audio_seconds: float = 0.0
+        self.playback_finish_time: float = 0.0
+        self.current_audio_type: Optional[str] = None  # None, "play_by_play", or "long"
+        self.current_audio_dynamic: Optional[SpeakingDynamic] = None
         self._interrupt_epoch: int = 0
         self._active_tasks: List[asyncio.Task] = []
         self._lock = asyncio.Lock()
@@ -113,11 +115,11 @@ class TTSService:
                 try:
                     if item.is_dir():
                         mtime = item.stat().st_mtime
-                        if mtime < cutoff:
+                        if mtime <= cutoff:
                             shutil.rmtree(item, ignore_errors=True)
                             deleted_count += 1
                     elif item.is_file() and item.suffix == ".mp3":
-                        if item.stat().st_mtime < cutoff:
+                        if mtime <= cutoff:
                             item.unlink(missing_ok=True)
                             deleted_count += 1
                 except Exception:
@@ -168,13 +170,53 @@ class TTSService:
     # Interrupt Management
     # ==========================================================================
 
+    # ==========================================================================
+    # Audio Playback & Backpressure State
+    # ==========================================================================
+
+    @property
+    def pending_audio_seconds(self) -> float:
+        """Returns remaining seconds of queued/playing audio based on real-time clock."""
+        now = time.time()
+        return max(0.0, round(self.playback_finish_time - now, 2))
+
+    @pending_audio_seconds.setter
+    def pending_audio_seconds(self, value: float) -> None:
+        now = time.time()
+        if value <= 0.0:
+            self.playback_finish_time = 0.0
+            self.current_audio_type = None
+            self.current_audio_dynamic = None
+        else:
+            self.playback_finish_time = now + value
+
+    @property
+    def is_long_audio_playing(self) -> bool:
+        """Returns True if long commentary audio is currently playing or queued."""
+        if self.pending_audio_seconds <= 0.1:
+            self.current_audio_type = None
+            self.current_audio_dynamic = None
+            return False
+        return self.current_audio_type == "long"
+
+    @property
+    def is_play_by_play_audio_playing(self) -> bool:
+        """Returns True if play-by-play audio is currently playing or queued."""
+        if self.pending_audio_seconds <= 0.1:
+            self.current_audio_type = None
+            self.current_audio_dynamic = None
+            return False
+        return self.current_audio_type == "play_by_play"
+
     def trigger_interrupt(self) -> None:
         """
         Cancels in-flight audio synthesis tasks and clears pending audio time
         when a high-priority tactical event (blunder/brilliant) occurs.
         """
         self._interrupt_epoch += 1
-        self.pending_audio_seconds = 0.0
+        self.playback_finish_time = 0.0
+        self.current_audio_type = None
+        self.current_audio_dynamic = None
 
         for task in self._active_tasks:
             if not task.done():
@@ -185,7 +227,12 @@ class TTSService:
 
     def consume_audio(self, duration_seconds: float) -> None:
         """Reduces the pending audio queue duration as audio completes playback."""
-        self.pending_audio_seconds = max(0.0, self.pending_audio_seconds - duration_seconds)
+        now = time.time()
+        if self.playback_finish_time > now:
+            self.playback_finish_time = max(now, self.playback_finish_time - duration_seconds)
+            if self.playback_finish_time <= now:
+                self.current_audio_type = None
+                self.current_audio_dynamic = None
 
     # ==========================================================================
     # Core Audio Synthesis
@@ -311,6 +358,16 @@ class TTSService:
         finally:
             if task in self._active_tasks:
                 self._active_tasks.remove(task)
+
+        # Classify the active audio stream
+        total_duration = sum(t.estimated_duration_seconds or 0.0 for t in exchange.turns)
+        if total_duration > 0:
+            is_pbp = (exchange.dynamic == SpeakingDynamic.PLAY_BY_PLAY)
+            if not is_pbp:
+                self.current_audio_type = "long"
+            elif self.current_audio_type != "long":
+                self.current_audio_type = "play_by_play"
+            self.current_audio_dynamic = exchange.dynamic
 
         return exchange
 

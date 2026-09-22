@@ -40,7 +40,7 @@ class PacedMoveStreamer:
         max_paced_move_delay_seconds: float = 45.0,
         target_live_ply: Optional[int] = None,
         game_format: Optional[str] = None,
-        enable_pondering: bool = True,
+        enable_pondering: bool = False,
         cooldown_plies: int = 4,
         min_ponder_ply: int = 8,
         is_broadcast: bool = False,
