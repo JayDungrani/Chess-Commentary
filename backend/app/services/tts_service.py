@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -86,6 +87,7 @@ class TTSService:
 
         self.output_dir = output_dir or DEFAULT_AUDIO_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.cleanup_old_audio()
 
         # Backpressure & lifecycle tracking
         self.pending_audio_seconds: float = 0.0
@@ -97,6 +99,34 @@ class TTSService:
             logger.warning(
                 "ELEVENLABS_API_KEY not found. TTS service will generate dummy audio metadata without API calls."
             )
+
+    def cleanup_old_audio(self, max_age_hours: int = 24) -> int:
+        """
+        Prunes session audio directories older than max_age_hours to prevent unbounded disk usage.
+        Returns number of deleted directories/files.
+        """
+        now = time.time()
+        deleted_count = 0
+        cutoff = now - (max_age_hours * 3600)
+        try:
+            for item in self.output_dir.iterdir():
+                try:
+                    if item.is_dir():
+                        mtime = item.stat().st_mtime
+                        if mtime < cutoff:
+                            shutil.rmtree(item, ignore_errors=True)
+                            deleted_count += 1
+                    elif item.is_file() and item.suffix == ".mp3":
+                        if item.stat().st_mtime < cutoff:
+                            item.unlink(missing_ok=True)
+                            deleted_count += 1
+                except Exception:
+                    continue
+            if deleted_count > 0:
+                logger.info(f"Cleaned up {deleted_count} stale audio sessions/files from storage.")
+        except Exception as exc:
+            logger.debug(f"Audio cleanup note: {exc}")
+        return deleted_count
 
     # ==========================================================================
     # Voice & Parameter Resolution
@@ -188,11 +218,15 @@ class TTSService:
         voice_id = self._get_voice_id(turn.speaker)
         voice_settings = self._get_voice_settings(turn.emotion, speaker=turn.speaker)
 
-        # Output filename: {game_id}_ply{ply}_{turn_index}_{speaker}.mp3
+        # Output filename: {output_dir}/{safe_game_id}/ply{ply:03d}_{turn_index}_{speaker}.mp3
         clean_speaker = turn.speaker.value.lower()
-        file_name = f"{game_id}_ply{ply:03d}_{turn_index}_{clean_speaker}.mp3"
-        file_path = self.output_dir / file_name
-        audio_url = f"/static/audio/{file_name}"
+        safe_game_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', game_id)
+        game_audio_dir = self.output_dir / safe_game_id
+        game_audio_dir.mkdir(parents=True, exist_ok=True)
+
+        file_name = f"ply{ply:03d}_{turn_index}_{clean_speaker}.mp3"
+        file_path = game_audio_dir / file_name
+        audio_url = f"/static/audio/{safe_game_id}/{file_name}"
 
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
         headers = {

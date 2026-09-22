@@ -196,8 +196,9 @@ export const TickerBar: React.FC<TickerBarProps> = ({
             </div>
           </div>
         ) : (
-          <span className="text-neutral-500 font-mono text-[11px]">
-            Waiting for live engine analysis...
+          <span className="text-neutral-500 font-mono text-[11px] flex items-center gap-2">
+            <Cpu className="w-3 h-3 text-[#e05338] animate-pulse" />
+            <span>Calculating engine continuation...</span>
           </span>
         )}
       </div>

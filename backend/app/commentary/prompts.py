@@ -206,6 +206,44 @@ def build_commentary_prompt(context: CommentaryContext) -> str:
         pawn_loss = abs(eval_data.eval_swing_cp) / 100.0
         prompt_lines.append(f"- Damage: Suboptimal move by {turn_color} (-{pawn_loss:.2f} pawns).")
 
+    # Position Bias & Asymmetry Directive for Lopsided Evaluations
+    cp_after = eval_data.eval_cp_after
+    mate_after = eval_data.mate_in_after
+
+    is_white_decisive = (mate_after is not None and mate_after > 0) or (cp_after is not None and cp_after >= 250)
+    is_black_decisive = (mate_after is not None and mate_after < 0) or (cp_after is not None and cp_after <= -250)
+    is_white_clear = cp_after is not None and 120 <= cp_after < 250
+    is_black_clear = cp_after is not None and -250 < cp_after <= -120
+
+    if is_white_decisive:
+        prompt_lines.extend([
+            "- BIASED POSITION DIRECTIVE (HEAVY WHITE ADVANTAGE):",
+            "  The board is decisively lopsided in favor of White!",
+            "  Your commentary MUST be opinionated and biased towards White's commanding dominance:",
+            "  • Frame White as cruising toward victory with overwhelming board control (e.g., 'White is completely in the driver\\'s seat', 'White will comfortably wrap this up unless an unthinkable blunder happens', 'White has a vice grip on this position').",
+            "  • Frame Black as hopelessly on life support or needing an absolute miracle to survive (e.g., 'Black\\'s defense is crumbling', 'Black is clinging on by a thread').",
+            "  • Do NOT treat this as an equal or uncertain struggle. Call the lopsided reality clearly and dramatically!",
+        ])
+    elif is_black_decisive:
+        prompt_lines.extend([
+            "- BIASED POSITION DIRECTIVE (HEAVY BLACK ADVANTAGE):",
+            "  The board is decisively lopsided in favor of Black!",
+            "  Your commentary MUST be opinionated and biased towards Black's commanding dominance:",
+            "  • Frame Black as cruising toward victory with overwhelming board control (e.g., 'Black is completely in the driver\\'s seat', 'Black will comfortably take this home unless an unthinkable blunder occurs', 'Black dominates every critical file and diagonal').",
+            "  • Frame White as hopelessly on life support or needing an absolute miracle to survive (e.g., 'White is clinging on by a thread', 'White\\'s position is collapsing under the pressure').",
+            "  • Do NOT treat this as an equal or uncertain struggle. Call the lopsided reality clearly and dramatically!",
+        ])
+    elif is_white_clear:
+        prompt_lines.extend([
+            "- ASYMMETRIC POSITION DIRECTIVE:",
+            "  White holds a clear, tangible upper hand. Frame White as pressing forward for the win while Black fights an uphill defensive battle.",
+        ])
+    elif is_black_clear:
+        prompt_lines.extend([
+            "- ASYMMETRIC POSITION DIRECTIVE:",
+            "  Black holds a clear, tangible upper hand. Frame Black as pressing forward for the win while White fights an uphill defensive battle.",
+        ])
+
     # 1. WHAT THE ACTIVE PLAYER MISSED (RETROSPECTIVE ALTERNATIVE)
     missed_alt_san = None
     missed_alt_line = ""

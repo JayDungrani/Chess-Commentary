@@ -34,7 +34,10 @@ class Settings(BaseSettings):
     pacing_buffer_max_delay_classical: float = 120.0
 
     # Stockfish Engine Settings
-    stockfish_path: str = r"C:\Users\PRINCE\Desktop\RAG\chess_engine\stockfish-windows-x86-64-universal\stockfish\stockfish-windows-x86-64-universal.exe"
+    stockfish_path: Optional[str] = os.getenv(
+        "STOCKFISH_PATH",
+        r"C:\Users\PRINCE\Desktop\RAG\chess_engine\stockfish-windows-x86-64-universal\stockfish\stockfish-windows-x86-64-universal.exe"
+    )
     stockfish_depth: int = 14
     stockfish_movetime_ms: int = 250
     stockfish_multipv: int = 3

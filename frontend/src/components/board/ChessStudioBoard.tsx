@@ -3,6 +3,7 @@ import { Chessboard } from 'react-chessboard';
 import type { Square } from 'chess.js';
 import type { VisualCue, ParsedMoveEvent } from '../../types/broadcast';
 import { useTheme } from '../../context/ThemeContext';
+import { soundEffects } from '../../utils/soundEffects';
 
 interface ChessStudioBoardProps {
   fen: string;
@@ -11,6 +12,9 @@ interface ChessStudioBoardProps {
   lastMove?: ParsedMoveEvent | null;
   boardWidth?: number;
   onHeightChange?: (height: number) => void;
+  isMuted?: boolean;
+  isGameOver?: boolean;
+  onMovePiece?: (sourceSquare: string, targetSquare: string) => boolean;
 }
 
 // Convert backend color names to tournament broadcast RGBA strokes
@@ -31,10 +35,39 @@ export const ChessStudioBoard: React.FC<ChessStudioBoardProps> = ({
   lastMove,
   boardWidth: propBoardWidth,
   onHeightChange,
+  isMuted = false,
+  isGameOver = false,
+  onMovePiece,
 }) => {
   const { isDark } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const [measuredWidth, setMeasuredWidth] = useState<number>(propBoardWidth || 420);
+  const prevMovePlyRef = useRef<number | null>(null);
+
+  // Sync mute state with sound synthesizer
+  useEffect(() => {
+    soundEffects.setMuted(isMuted);
+  }, [isMuted]);
+
+  // Synthesize tactile wooden sound effects on move transitions
+  useEffect(() => {
+    if (!lastMove || lastMove.ply == null) return;
+    if (prevMovePlyRef.current === lastMove.ply) return;
+    prevMovePlyRef.current = lastMove.ply;
+
+    const san = lastMove.san || '';
+    if (lastMove.is_checkmate || (isGameOver && lastMove.is_check)) {
+      soundEffects.playGameOver();
+    } else if (lastMove.is_check || san.includes('+')) {
+      soundEffects.playCheck();
+    } else if (san.startsWith('O-O') || san.startsWith('0-0')) {
+      soundEffects.playCastle();
+    } else if (san.includes('x')) {
+      soundEffects.playCapture();
+    } else {
+      soundEffects.playMove();
+    }
+  }, [lastMove, isGameOver]);
 
   // Measure parent container and notify parent of height changes
   useEffect(() => {
@@ -124,7 +157,13 @@ export const ChessStudioBoard: React.FC<ChessStudioBoardProps> = ({
           position={fen}
           boardOrientation={boardOrientation}
           boardWidth={measuredWidth}
-          arePiecesDraggable={false}
+          arePiecesDraggable={true}
+          onPieceDrop={(sourceSquare, targetSquare) => {
+            if (onMovePiece) {
+              return onMovePiece(sourceSquare, targetSquare);
+            }
+            return false;
+          }}
           animationDuration={260}
           customArrows={customArrows}
           customSquareStyles={customSquareStyles}

@@ -154,6 +154,15 @@ class ChessStateTracker:
 
             return self.metadata
 
+        # Clock sync packet without moves
+        if ("wc" in data or "bc" in data or "wtime" in data or "btime" in data) and "lm" not in data and "moves" not in data:
+            wc, bc = self._extract_clocks(data)
+            if wc is not None:
+                self.last_white_clock = wc
+            if bc is not None:
+                self.last_black_clock = bc
+            return None
+
         # 3. Board API Incremental Update ("gameState")
         if event_type == "gameState" or "moves" in data:
             moves_str = data.get("moves", "").strip()

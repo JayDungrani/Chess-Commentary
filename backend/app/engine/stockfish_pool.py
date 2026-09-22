@@ -2,11 +2,14 @@
 
 import asyncio
 import logging
+import os
+import shutil
+from pathlib import Path
 from typing import Optional, List
 import chess
 import chess.engine
 
-from app.config import settings
+from app.config import settings, PROJECT_ROOT, BACKEND_DIR
 from app.engine.schemas import EngineLine, PositionAnalysis
 from app.engine.heuristics import cp_to_win_prob
 
@@ -15,6 +18,125 @@ logger = logging.getLogger(__name__)
 # Global singleton storage
 _global_engine_instance: Optional["StockfishEngine"] = None
 _instance_init_lock = asyncio.Lock()
+
+PIECE_VALUES = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 320,
+    chess.BISHOP: 330,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+    chess.KING: 0,
+}
+
+
+def find_stockfish_binary(configured_path: Optional[str] = None) -> Optional[str]:
+    """
+    Auto-discovers the Stockfish chess engine binary across platforms:
+    1. Explicit configured path or STOCKFISH_PATH environment variable
+    2. System PATH via shutil.which
+    3. Common directory locations on Linux/Docker, macOS, and Windows
+    """
+    # 1. Check explicit path
+    target = configured_path or os.getenv("STOCKFISH_PATH") or getattr(settings, "stockfish_path", None)
+    if target:
+        try:
+            p = Path(target).expanduser().resolve()
+            if p.is_file():
+                return str(p)
+        except Exception:
+            pass
+
+    # 2. Check system PATH
+    bin_names = [
+        "stockfish",
+        "stockfish.exe",
+        "stockfish-windows-x86-64-universal.exe",
+        "stockfish-windows-x86-64-avx2.exe",
+        "stockfish-windows-x86-64-modern.exe",
+        "stockfish-ubuntu-x86-64-avx2",
+        "stockfish-ubuntu-x86-64-modern",
+    ]
+    for name in bin_names:
+        found = shutil.which(name)
+        if found and os.path.isfile(found):
+            return str(Path(found).resolve())
+
+    # 3. Known platform locations
+    candidate_locations = [
+        # Linux / Docker
+        Path("/usr/games/stockfish"),
+        Path("/usr/bin/stockfish"),
+        Path("/usr/local/bin/stockfish"),
+        Path("/snap/bin/stockfish"),
+        # macOS Homebrew
+        Path("/opt/homebrew/bin/stockfish"),
+        Path("/usr/local/bin/stockfish"),
+        # Project-relative directories
+        PROJECT_ROOT / "chess_engine",
+        PROJECT_ROOT / "bin",
+        BACKEND_DIR / "bin",
+        # Windows user desktop or system roots
+        Path.home() / "Desktop" / "RAG" / "chess_engine",
+        Path(r"C:\stockfish"),
+        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Stockfish",
+    ]
+
+    for loc in candidate_locations:
+        if loc.is_file():
+            return str(loc.resolve())
+        elif loc.is_dir():
+            for pattern in ["stockfish*", "*stockfish*.exe"]:
+                for match in loc.rglob(pattern):
+                    if match.is_file():
+                        return str(match.resolve())
+
+    return None
+
+
+def _heuristic_evaluate_fen(fen: str, depth: int = 1, multipv: int = 3) -> PositionAnalysis:
+    """Fallback static heuristic evaluation when Stockfish binary is unavailable."""
+    board = chess.Board(fen)
+    if board.is_checkmate():
+        mate_in = 0 if board.turn == chess.WHITE else 1
+        score_cp = None
+    elif board.is_game_over():
+        mate_in = None
+        score_cp = 0
+    else:
+        mate_in = None
+        white_mat = sum(len(board.pieces(p, chess.WHITE)) * val for p, val in PIECE_VALUES.items())
+        black_mat = sum(len(board.pieces(p, chess.BLACK)) * val for p, val in PIECE_VALUES.items())
+        score_cp = white_mat - black_mat
+
+    win_prob = cp_to_win_prob(score_cp=score_cp, mate_in=mate_in)
+
+    parsed_lines: List[EngineLine] = []
+    legal_moves = list(board.legal_moves)
+    for idx, move in enumerate(legal_moves[:multipv]):
+        temp_b = board.copy()
+        san = temp_b.san(move)
+        temp_b.push(move)
+        parsed_lines.append(
+            EngineLine(
+                rank=idx + 1,
+                score_cp=score_cp,
+                mate_in=mate_in,
+                win_probability=win_prob,
+                uci_moves=[move.uci()],
+                san_moves=[san],
+                depth=depth,
+            )
+        )
+
+    top_line = parsed_lines[0] if parsed_lines else None
+    return PositionAnalysis(
+        fen=fen,
+        depth=depth,
+        lines=parsed_lines,
+        score_cp=score_cp,
+        mate_in=mate_in,
+        win_probability=win_prob,
+    )
 
 
 class StockfishEngine:
@@ -27,7 +149,7 @@ class StockfishEngine:
         threads: int = settings.stockfish_threads,
         hash_mb: int = settings.stockfish_hash_mb,
     ):
-        self.binary_path = binary_path or settings.stockfish_path
+        self.binary_path = binary_path or find_stockfish_binary()
         self.multipv = multipv
         self.depth = depth
         self.movetime_ms = movetime_ms
@@ -36,11 +158,12 @@ class StockfishEngine:
 
         self._engine: Optional[chess.engine.SimpleEngine] = None
         self._lock = asyncio.Lock()
+        self.is_available: bool = False
 
     @property
     def is_alive(self) -> bool:
         """Returns True if the engine process is running and responsive."""
-        if self._engine is None:
+        if not self.is_available or self._engine is None:
             return False
         try:
             # 1. Check asyncio subprocess transport exit code
@@ -53,10 +176,10 @@ class StockfishEngine:
 
             return True
         except Exception:
-            return True  # If the engine instance exists, assume alive to prevent runaway spawns
+            return True
 
     async def start(self) -> None:
-        """Launches the Stockfish engine process via a worker thread."""
+        """Launches the Stockfish engine process with non-crashing fallback."""
         if self.is_alive:
             return
 
@@ -67,6 +190,16 @@ class StockfishEngine:
             except Exception:
                 pass
             self._engine = None
+
+        if not self.binary_path:
+            self.binary_path = find_stockfish_binary()
+
+        if not self.binary_path or not os.path.exists(self.binary_path):
+            logger.warning(
+                "Stockfish binary not located on system. StockfishEngine will operate in heuristic fallback mode."
+            )
+            self.is_available = False
+            return
 
         try:
             logger.info(f"Spawning persistent Stockfish instance from '{self.binary_path}'...")
@@ -80,13 +213,16 @@ class StockfishEngine:
                     "Hash": self.hash_mb,
                 },
             )
+            self.is_available = True
             logger.info(
                 f"Stockfish online: Threads={self.threads}, Hash={self.hash_mb}MB, MultiPV={self.multipv}"
             )
         except Exception as exc:
-            logger.error(f"Failed to start Stockfish process: {exc}")
+            logger.warning(
+                f"Failed to start Stockfish process at '{self.binary_path}': {exc}. Switching to heuristic fallback mode."
+            )
             self._engine = None
-            raise
+            self.is_available = False
 
     async def close(self) -> None:
         """Gracefully terminates the Stockfish process with fallback force kill."""
@@ -103,6 +239,7 @@ class StockfishEngine:
                     pass
             finally:
                 self._engine = None
+                self.is_available = False
                 logger.info("Stockfish engine shutdown complete.")
 
     async def analyze_position(
@@ -111,24 +248,34 @@ class StockfishEngine:
         depth: Optional[int] = None,
         movetime_ms: Optional[int] = None,
     ) -> PositionAnalysis:
-        if not self.is_alive:
-            await self.start()
-
         target_depth = depth or self.depth
         time_limit = (movetime_ms or self.movetime_ms) / 1000.0
+
+        if not self.is_alive:
+            try:
+                await self.start()
+            except Exception:
+                pass
+
+        if not self.is_alive or self._engine is None:
+            return _heuristic_evaluate_fen(fen, target_depth, self.multipv)
 
         board = chess.Board(fen=fen)
         limit = chess.engine.Limit(depth=target_depth, time=time_limit)
 
         # Mutex lock ensures concurrent LLM / AFC calls do not interleave UCI commands
-        async with self._lock:
-            assert self._engine is not None
-            results = await asyncio.to_thread(
-                self._engine.analyse,
-                board,
-                limit,
-                multipv=self.multipv,
-            )
+        try:
+            async with self._lock:
+                assert self._engine is not None
+                results = await asyncio.to_thread(
+                    self._engine.analyse,
+                    board,
+                    limit,
+                    multipv=self.multipv,
+                )
+        except Exception as exc:
+            logger.warning(f"Engine analysis encountered error: {exc}. Using fallback.")
+            return _heuristic_evaluate_fen(fen, target_depth, self.multipv)
 
         raw_lines = results if isinstance(results, list) else [results]
         parsed_lines: List[EngineLine] = []
@@ -192,7 +339,10 @@ async def get_stockfish_engine() -> StockfishEngine:
         async with _instance_init_lock:
             if _global_engine_instance is None or not _global_engine_instance.is_alive:
                 engine = StockfishEngine()
-                await engine.start()
+                try:
+                    await engine.start()
+                except Exception as exc:
+                    logger.warning(f"Could not initialize stockfish engine on startup: {exc}")
                 _global_engine_instance = engine
     return _global_engine_instance
 

@@ -325,11 +325,15 @@ class BroadcastSession:
         book: Optional[OpeningBook] = None,
         agent: Optional[CommentaryAgent] = None,
         tts_service: Optional[TTSService] = None,
+        custom_pgn: Optional[str] = None,
+        custom_move_delay: float = 2.0,
     ):
         self.game_id = game_id
         self.round_id = round_id
         self.replay_all = replay_all
         self.enable_tts = enable_tts
+        self.custom_pgn = custom_pgn
+        self.custom_move_delay = custom_move_delay
 
         self._external_engine = engine is not None
         self.engine = engine or StockfishEngine(
@@ -734,9 +738,145 @@ class BroadcastSession:
 
         return exchange
 
+    async def _stream_custom_pgn(self) -> AsyncGenerator[BroadcastFrame, None]:
+        if not self.custom_pgn:
+            return
+
+        game = chess.pgn.read_game(io.StringIO(self.custom_pgn))
+        if not game:
+            yield BroadcastFrame(
+                event_type=BroadcastEventType.ERROR,
+                game_id=self.game_id,
+                error="Failed to parse custom PGN game.",
+            )
+            return
+
+        headers = game.headers
+        w_name = headers.get("White", "White")
+        b_name = headers.get("Black", "Black")
+        w_elo = int(headers["WhiteElo"]) if headers.get("WhiteElo", "").isdigit() else None
+        b_elo = int(headers["BlackElo"]) if headers.get("BlackElo", "").isdigit() else None
+        event_name = headers.get("Event", "Custom Broadcast Studio")
+
+        meta = GameMetadata(
+            game_id=self.game_id,
+            speed="rapid",
+            variant="standard",
+            rated=False,
+            white_player=PlayerInfo(username=w_name, rating=w_elo),
+            black_player=PlayerInfo(username=b_name, rating=b_elo),
+            event_name=event_name,
+        )
+
+        self.analyzer.reset()
+        self.director.reset(game_format="rapid")
+
+        yield BroadcastFrame(
+            event_type=BroadcastEventType.METADATA,
+            game_id=self.game_id,
+            fen=chess.STARTING_FEN,
+            metadata=meta,
+        )
+
+        board = game.board()
+        current_node = game
+        ply = 0
+
+        while current_node.variations:
+            if self._stop_event.is_set():
+                break
+
+            next_node = current_node.variation(0)
+            move = next_node.move
+            ply += 1
+            turn_str = "white" if board.turn == chess.WHITE else "black"
+            acting = w_name if turn_str == "white" else b_name
+            san = board.san(move)
+            uci = move.uci()
+            board.push(move)
+
+            parsed_event = ParsedMoveEvent(
+                ply=ply,
+                turn=turn_str,
+                uci=uci,
+                san=san,
+                fen=board.fen(),
+                move_time_spent_seconds=1.5,
+                is_check=board.is_check(),
+                is_checkmate=board.is_checkmate(),
+                is_stalemate=board.is_stalemate(),
+                is_draw=board.is_game_over() and not board.is_checkmate(),
+                acting_player=acting,
+            )
+
+            evaluation = await self.analyzer.evaluate_move(parsed_event)
+            pending_audio = self.tts_service.pending_audio_seconds if self.tts_service else 0.0
+
+            context = self.director.assemble_context(
+                eval_data=evaluation,
+                event=parsed_event,
+                white_player=w_name,
+                black_player=b_name,
+                pending_audio_seconds=pending_audio,
+                was_pondered=False,
+            )
+            exchange = await self.agent.generate_commentary(context)
+
+            if self.tts_service and self.enable_tts:
+                exchange = await self.tts_service.synthesize_exchange(
+                    exchange=exchange,
+                    game_id=self.game_id,
+                )
+
+            self.director.record_exchange(exchange)
+
+            yield BroadcastFrame(
+                event_type=BroadcastEventType.MOVE,
+                game_id=self.game_id,
+                ply=ply,
+                fen=board.fen(),
+                turn=turn_str,
+                move=parsed_event,
+                evaluation=evaluation,
+                commentary=exchange,
+                visual_cues=evaluation.visual_cues if evaluation else None,
+            )
+
+            # Pacing delay between moves in custom PGN (defaults to 2.0s)
+            delay_sec = max(0.2, self.custom_move_delay) if self.custom_move_delay is not None else 2.0
+            await asyncio.sleep(delay_sec)
+
+            current_node = next_node
+
+        # Concluding termination frame
+        result = headers.get("Result", "*")
+        reason = f"Match Concluded ({result})"
+        winner = "white" if result == "1-0" else ("black" if result == "0-1" else None)
+        closing_exchange = await self._generate_closing_commentary(
+            winner=winner,
+            result_str=result,
+            termination_reason=reason,
+            white_player=w_name,
+            black_player=b_name,
+        )
+
+        yield BroadcastFrame(
+            event_type=BroadcastEventType.TERMINATION,
+            game_id=self.game_id,
+            ply=ply,
+            fen=board.fen(),
+            termination_reason=reason,
+            commentary=closing_exchange,
+        )
+
     async def stream_broadcast(self) -> AsyncGenerator[BroadcastFrame, None]:
         if not self.is_running:
             await self.start()
+
+        if self.custom_pgn:
+            async for frame in self._stream_custom_pgn():
+                yield frame
+            return
 
         target_start_ply = 0
         if not self.replay_all:

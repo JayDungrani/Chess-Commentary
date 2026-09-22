@@ -9,12 +9,24 @@ interface BroadcastConfig {
   roundId?: string;
   enableTts: boolean;
   replayAll: boolean;
+  initialSnapshots?: any[];
+  initialMetadata?: any;
+  initialMoveDelay?: number;
 }
 
 type ViewState =
   | { type: 'landing' }
   | { type: 'event'; roundId: string; enableTts: boolean; replayAll: boolean }
-  | { type: 'studio'; gameId: string; roundId?: string; enableTts: boolean; replayAll: boolean };
+  | {
+      type: 'studio';
+      gameId: string;
+      roundId?: string;
+      enableTts: boolean;
+      replayAll: boolean;
+      initialSnapshots?: any[];
+      initialMetadata?: any;
+      initialMoveDelay?: number;
+    };
 
 const AppContent: React.FC = () => {
   const [viewState, setViewState] = useState<ViewState>({ type: 'landing' });
@@ -37,6 +49,9 @@ const AppContent: React.FC = () => {
         roundId: config.roundId,
         enableTts: config.enableTts,
         replayAll: config.replayAll,
+        initialSnapshots: config.initialSnapshots,
+        initialMetadata: config.initialMetadata,
+        initialMoveDelay: config.initialMoveDelay,
       });
     }
   };
@@ -92,6 +107,9 @@ const AppContent: React.FC = () => {
           roundId={viewState.roundId}
           initialEnableTts={viewState.enableTts}
           replayAll={viewState.replayAll}
+          initialSnapshots={viewState.initialSnapshots}
+          initialMetadata={viewState.initialMetadata}
+          initialMoveDelay={viewState.initialMoveDelay}
           onExit={handleExitStudio}
         />
       )}
