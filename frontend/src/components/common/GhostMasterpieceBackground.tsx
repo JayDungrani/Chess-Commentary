@@ -241,6 +241,7 @@ export const GhostMasterpieceBackground: React.FC = () => {
           if (!squarePiece) continue;
 
           drawPiece(
+            ctx,
             c,
             r,
             0,
@@ -302,6 +303,7 @@ export const GhostMasterpieceBackground: React.FC = () => {
 
         // Moving piece itself
         drawPiece(
+          ctx,
           curCol,
           curRow,
           arcHeight,
@@ -329,6 +331,7 @@ export const GhostMasterpieceBackground: React.FC = () => {
 
     // Helper: Draw Minimalist Architectural Piece Token
     function drawPiece(
+      ctx: CanvasRenderingContext2D,
       col: number,
       row: number,
       altitude: number,

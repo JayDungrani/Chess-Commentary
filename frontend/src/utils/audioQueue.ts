@@ -69,6 +69,11 @@ class RadioAudioEngine {
     const turn = this.queue.shift()!;
     const audioUrl = turn.audio_url;
 
+    if (!audioUrl) {
+      this.playNext();
+      return;
+    }
+
     try {
       const audio = new Audio(audioUrl);
       this.currentAudio = audio;

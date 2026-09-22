@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     win_prob_scaling: float = 400.0
 
     # LLM & TTS Settings
+    gemini_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    gemini_model: str = "gemini-2.5-flash"
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     elevenlabs_api_key: Optional[str] = None

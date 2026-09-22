@@ -10,8 +10,9 @@ services:
       HOST: "0.0.0.0"
       PORT: "8000"
       STOCKFISH_PATH: /usr/games/stockfish
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - tts-audio:/app/backend/static/audio
     healthcheck:
@@ -36,8 +37,9 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+    restart: unless-stopped
     ports:
-      - "3000:80"
+      - "${FRONTEND_PORT:-3000}:80"
     depends_on:
       backend:
         condition: service_healthy

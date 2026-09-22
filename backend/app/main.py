@@ -594,5 +594,6 @@ async def get_broadcast_round_games(round_id: str):
 
 
 @app.get("/health")
+@app.get("/api/health")
 async def health_check():
     return {"status": "online"}

@@ -5,10 +5,8 @@ import {
   RotateCw,
   Search,
   Radio,
-  ExternalLink,
   Users,
   CheckCircle2,
-  Clock,
 } from 'lucide-react';
 import { Chessboard } from 'react-chessboard';
 import type { BroadcastGameSummary } from '../types/broadcast';

@@ -10,7 +10,6 @@
 class ChessSoundSynthesizer {
   private ctx: AudioContext | null = null;
   private isMuted: boolean = false;
-  private isInitialized: boolean = false;
 
   constructor() {
     // Lazy initialization on first user interaction to comply with browser autoplay policies
@@ -31,7 +30,6 @@ class ChessSoundSynthesizer {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
-        this.isInitialized = true;
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {

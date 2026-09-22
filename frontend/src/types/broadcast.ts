@@ -34,6 +34,7 @@ export interface PlayerInfo {
 
 export interface GameMetadata {
   game_id: string;
+  round_id?: string | null;
   speed: string;
   variant: string;
   rated: boolean;

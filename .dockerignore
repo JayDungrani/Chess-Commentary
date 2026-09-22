@@ -1,33 +1,35 @@
 # Version control
 .git
 .gitignore
+.github
 
-# Python & testing
-**/__pycache__
-**/*.py[cod]
-**/*.so
+# Python build & virtual environments
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
 .venv
-venv/
-ENV/
-*.egg-info/
-.pytest_cache/
+venv
+ENV
+env
+.pytest_cache
 .coverage
-htmlcov/
-backend/notebooks/
+htmlcov
 
-# Node & Frontend
-**/node_modules/
-**/dist/
-frontend/dist/
-frontend/node_modules/
-.npm
-*.log
+# Node & Frontend dependencies/builds
+frontend/node_modules
+frontend/dist
+frontend/.vite
 
-# Audio artifacts
+# Secrets and local environments (never bake credentials into images)
+.env
+.env.*
+!.env.example
+
+# Temporary and local static media (TTS audio is mounted via docker volume)
 backend/static/audio/*.mp3
-
-# Editor / OS files
-.vscode/
-.idea/
+!backend/static/audio/.gitkeep
+*.log
 .DS_Store
 Thumbs.db

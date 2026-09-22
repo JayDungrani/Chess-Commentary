@@ -391,12 +391,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
           san: moveResult.san,
           uci: `${sourceSquare}${targetSquare}${moveResult.promotion || ''}`,
           turn: moveResult.color === 'w' ? 'white' : 'black',
+          fen: newFen,
           ply: currentPlyCount + 1,
           white_clock_seconds: null,
           black_clock_seconds: null,
-          move_time_spent_seconds: null,
+          move_time_spent_seconds: 0,
           is_check: isCheck,
           is_checkmate: isCheckmate,
+          is_stalemate: chess.isStalemate(),
+          is_draw: chess.isDraw(),
+          is_time_trouble: false,
         };
         setSandboxLastMove(parsedMove);
 
